@@ -29,11 +29,19 @@ mix      → data/mix/{data_mix.json, data_mix.txt, data_path.args}
 3. Register the subparser in `src/longctx/cli.py`.
 4. Update the `CLI` and `directory-layout` SPEC blocks in `README.md` if the layout changes.
 
-## Adding a new source (e.g. HPLT for `ga`/`sq`/`lb`)
+## Adding a new source
 
-1. Write `src/longctx/sources/<source>.py` that produces `data/megatron/<lc>.jsonl` with the JSONL schema above.
-2. From there, `filter-long` → `tokenize` → `mix` work unchanged.
-3. Don't modify `LANG_MAP` — that is finepdfs-edu-specific.
+1. Write `src/longctx/sources/<source>.py` exposing `NAME`, `DATASET_ID`, `GATED: bool`, `SUPPORTED: dict[iso_639_1, adapter_config]`, and `fetch(lang, output_path, *, sample=False, max_docs=None) -> dict`.
+2. Register it in `src/longctx/sources/__init__.py` under `SOURCES`.
+3. Downstream commands are source-agnostic — they read every `*.jsonl` under `data/megatron/`.
+4. Don't modify `LANG_MAP` (FinePDFs-Edu specific); per-adapter mappings live on the adapter.
+
+**Existing adapters** (both cover all 38 OpenEuroLLM target langs including `ga`, `sq`, `lb`):
+
+| Name       | HF id                  | Gated | Config codes          |
+|------------|------------------------|-------|-----------------------|
+| `hplt`     | `HPLT/HPLT2.0_cleaned` | no    | ISO 639-3 + script    |
+| `culturax` | `uonlp/CulturaX`       | yes   | ISO 639-1 pass-through|
 
 ## Running tests / smoke checks
 

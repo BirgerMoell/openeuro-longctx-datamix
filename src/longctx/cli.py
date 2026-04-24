@@ -22,6 +22,8 @@ from longctx.commands import (
     cmd_filter_long,
     cmd_mix,
     cmd_run,
+    cmd_sources_fetch,
+    cmd_sources_list,
     cmd_tokenize,
 )
 
@@ -130,6 +132,32 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--suffix", default="_text_document",
                     help="Megatron prefix suffix (default '_text_document')")
     pm.set_defaults(func=cmd_mix)
+
+    # ── sources (alt corpora for missing/supplementary langs) ────────────────
+    ps = sub.add_parser(
+        "sources",
+        help="Alternative sources for languages missing from FinePDFs-Edu",
+    )
+    ps_sub = ps.add_subparsers(dest="sources_command", required=True, metavar="ACTION")
+
+    ps_list = ps_sub.add_parser("list", help="List registered source adapters")
+    ps_list.set_defaults(func=cmd_sources_list)
+
+    ps_fetch = ps_sub.add_parser("fetch",
+                                 help="Fetch a source into Megatron JSONL format")
+    ps_fetch.add_argument("--source", required=True,
+                          help="Adapter name (see `longctx sources list`)")
+    ps_fetch.add_argument("--languages", required=True,
+                          help="Comma-separated ISO 639-1 codes (e.g. ga,sq,lb)")
+    ps_fetch.add_argument("--megatron-dir", default=DEFAULT_MEGATRON_DIR,
+                          help="Where to write {lc}.jsonl")
+    ps_fetch.add_argument("--sample", action="store_true",
+                          help="Quick probe: cap at 1000 docs per language")
+    ps_fetch.add_argument("--max-docs", type=int, default=None,
+                          help="Cap docs per language (overrides --sample cap)")
+    ps_fetch.add_argument("--overwrite", action="store_true",
+                          help="Overwrite existing {lc}.jsonl files")
+    ps_fetch.set_defaults(func=cmd_sources_fetch)
 
     # ── run (download + convert, optionally filter) ──────────────────────────
     pr = sub.add_parser("run",

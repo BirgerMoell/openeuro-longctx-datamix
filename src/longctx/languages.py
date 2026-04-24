@@ -51,11 +51,14 @@ LANG_MAP: dict[str, str] = {
     "cy": "cym_Latn",   # Welsh
 }
 
-# OpenEuroLLM targets without FinePDFs-Edu coverage (need a different source).
+# OpenEuroLLM targets without FinePDFs-Edu coverage. For these, use:
+#   longctx sources fetch --source hplt     --languages ga,sq,lb
+#   longctx sources fetch --source culturax --languages ga,sq,lb     # gated
+# after which `filter-long`, `tokenize`, and `mix` work unchanged.
 MISSING_LANGS: dict[str, str] = {
-    "ga": "Irish Gaelic (gle) — not in finepdfs-edu; use HPLT or CulturaX",
-    "sq": "Albanian (sqi) — not in finepdfs-edu; use HPLT or CulturaX",
-    "lb": "Luxembourgish (ltz) — not in finepdfs-edu; use HPLT or Wikipedia",
+    "ga": "Irish Gaelic (gle) — not in finepdfs-edu; `longctx sources fetch --source hplt --languages ga`",
+    "sq": "Albanian (als/sqi) — not in finepdfs-edu; `longctx sources fetch --source hplt --languages sq`",
+    "lb": "Luxembourgish (ltz) — not in finepdfs-edu; `longctx sources fetch --source hplt --languages lb`",
 }
 
 DATASET_ID = "HuggingFaceFW/finepdfs-edu"

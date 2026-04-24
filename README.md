@@ -16,18 +16,35 @@ PDF-derived corpora are naturally long: unlike web text, documents routinely exc
 
 ## Language coverage
 
-**35 of 38 OpenEuroLLM target languages are included** (all data from FinePDFs-Edu). The mapping `ISO 639-1 → FinePDFs folder` lives in [`src/longctx/languages.py`](src/longctx/languages.py).
+**All 38 OpenEuroLLM target languages are reachable** — 35 from FinePDFs-Edu (primary source), and the 3 missing ones (`ga`, `sq`, `lb`) via the `sources` subcommand which streams from HPLT or CulturaX.
 
 <!-- SPEC: language-coverage -->
-| Group | ISO 639-1 codes | Count |
-| --- | --- | --- |
-| EU official (present in FinePDFs-Edu) | `bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro sk sl sv` | **22** |
-| Additional European | `bs ca cy eu gl is mk no ru sr tr uk` | **13** |
-| **Total covered** | — | **35** |
-| **Missing from FinePDFs-Edu** | `ga` (Irish Gaelic), `sq` (Albanian), `lb` (Luxembourgish) | **3** |
-
-For the missing languages, bring your own JSONL (HPLT, CulturaX, Wikipedia) in the same schema (`{"text": "..."}`) and drop it into `data/megatron/` — the rest of the pipeline will pick them up.
+| Group | ISO 639-1 codes | Count | Source |
+| --- | --- | --- | --- |
+| EU official (FinePDFs-Edu) | `bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro sk sl sv` | **22** | `download` |
+| Additional European (FinePDFs-Edu) | `bs ca cy eu gl is mk no ru sr tr uk` | **13** | `download` |
+| Missing from FinePDFs-Edu | `ga sq lb` | **3** | `sources fetch` (HPLT / CulturaX) |
+| **Total reachable** | — | **38** | — |
 <!-- /SPEC -->
+
+The mapping `ISO 639-1 → FinePDFs folder` lives in [`src/longctx/languages.py`](src/longctx/languages.py); adapter-specific mappings live under [`src/longctx/sources/`](src/longctx/sources).
+
+### Filling in the missing three
+
+```bash
+# HPLT is ungated and covers all 38 targets — one command gets ga/sq/lb:
+longctx sources fetch --source hplt \
+                      --languages ga,sq,lb \
+                      --megatron-dir data/megatron
+
+# CulturaX is gated; accept terms at https://huggingface.co/datasets/uonlp/CulturaX
+# and `export HF_TOKEN=hf_...` first, then:
+longctx sources fetch --source culturax \
+                      --languages ga,sq,lb \
+                      --megatron-dir data/megatron
+```
+
+After that, `filter-long`, `tokenize`, and `mix` work unchanged — all three missing languages flow through the same long-context pipeline as the 35 FinePDFs-Edu ones.
 
 ---
 
@@ -104,27 +121,42 @@ See [`examples/train_openeurollm_longctx.sh`](examples/train_openeurollm_longctx
 
 <!-- SPEC: cli -->
 ```
-longctx estimate     --languages bg,fr,...  --output-dir data/raw
-longctx download     --languages bg,fr,...  --output-dir data/raw
-                     [--sample] [--shards N]
-longctx convert      --output-dir data/raw  --megatron-dir data/megatron
-                     [--max-docs-per-shard N] [--keep-token-count]
-longctx filter-long  --megatron-dir data/megatron --long-dir data/long
-                     --min-tokens 8192 [--max-tokens 131072]
-                     [--languages bg,...]
-longctx tokenize     --input-dir data/long  --output-dir data/bin
-                     --tokenizer-type HuggingFaceTokenizer
-                     --tokenizer-model meta-llama/Llama-3.1-8B
-                     [--vocab-size 128256] [--megatron-path $MEGATRON_LM]
-                     [--workers N] [--partitions K]
-                     [--append-eod] [--dry-run]
-longctx mix          --bin-dir data/bin --mix-dir data/mix
-                     [--alpha 0.3] [--floor 0.005]
-                     [--languages bg,...] [--suffix _text_document]
-longctx run          --languages bg,...  [--sample] [--filter-long]
-                     --output-dir data/raw --megatron-dir data/megatron
-                     [--long-dir data/long --min-tokens 8192]
+longctx estimate         --languages bg,fr,...  --output-dir data/raw
+longctx download         --languages bg,fr,...  --output-dir data/raw
+                         [--sample] [--shards N]
+longctx convert          --output-dir data/raw  --megatron-dir data/megatron
+                         [--max-docs-per-shard N] [--keep-token-count]
+longctx filter-long      --megatron-dir data/megatron --long-dir data/long
+                         --min-tokens 8192 [--max-tokens 131072]
+                         [--languages bg,...]
+longctx sources list
+longctx sources fetch    --source hplt|culturax  --languages ga,sq,lb
+                         --megatron-dir data/megatron
+                         [--sample] [--max-docs N] [--overwrite]
+longctx tokenize         --input-dir data/long  --output-dir data/bin
+                         --tokenizer-type HuggingFaceTokenizer
+                         --tokenizer-model meta-llama/Llama-3.1-8B
+                         [--vocab-size 128256] [--megatron-path $MEGATRON_LM]
+                         [--workers N] [--partitions K]
+                         [--append-eod] [--dry-run]
+longctx mix              --bin-dir data/bin --mix-dir data/mix
+                         [--alpha 0.3] [--floor 0.005]
+                         [--languages bg,...] [--suffix _text_document]
+longctx run              --languages bg,...  [--sample] [--filter-long]
+                         --output-dir data/raw --megatron-dir data/megatron
+                         [--long-dir data/long --min-tokens 8192]
 ```
+<!-- /SPEC -->
+
+### Source adapters
+
+<!-- SPEC: source-adapters -->
+| Source | HF dataset | Gated | Langs covered | Notes |
+| --- | --- | --- | --- | --- |
+| `hplt` | `HPLT/HPLT2.0_cleaned` | No | All 38 (incl. `ga sq lb`) | Primary for missing langs; uses ISO 639-3 + script codes internally |
+| `culturax` | `uonlp/CulturaX` | **Yes** | All 38 | Accept terms + set `HF_TOKEN` |
+
+Adapters write `{lc}.jsonl` in the canonical `{text, token_count}` schema into `--megatron-dir`, so every downstream step (`filter-long`, `tokenize`, `mix`) works identically to the FinePDFs-Edu path. See [`src/longctx/sources/`](src/longctx/sources/) to add new adapters.
 <!-- /SPEC -->
 
 ---
