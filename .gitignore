@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Data (never commit raw/tokenized data)
+data/
+*.parquet
+*.jsonl
+*.bin
+*.idx
+
+# Megatron tokenizer caches
+data_cache_ctx_ext/
+data_cache*/
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+run_*.log
+
+# Pytest
+.pytest_cache/

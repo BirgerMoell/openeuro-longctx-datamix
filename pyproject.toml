@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openeuro-longctx-datamix"
+version = "0.1.0"
+description = "Build a long-context data mix from FinePDFs-Edu for OpenEuroLLM / NVIDIA-Megatron-LM training."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Birger Moell", email = "birger.moell@gmail.com" }]
+keywords = [
+  "openeurollm",
+  "megatron-lm",
+  "long-context",
+  "context-extension",
+  "data-mix",
+  "finepdfs",
+  "multilingual",
+  "llm-training",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "huggingface_hub>=0.24",
+  "pyarrow>=15",
+  "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+longctx = "longctx.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/birgermoell/openeuro-longctx-datamix"
+Issues = "https://github.com/birgermoell/openeuro-longctx-datamix/issues"
+"Megatron Fork" = "https://github.com/OpenEuroLLM/NVIDIA-Megatron-LM"
+"Dataset" = "https://huggingface.co/datasets/HuggingFaceFW/finepdfs-edu"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"longctx" = ["py.typed"]
