@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -p dev-g
-#SBATCH -t 00:30:00
+#SBATCH -t 00:45:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --gpus-per-task=1
@@ -103,6 +103,81 @@ singularity exec "$SIF" bash -c "
     echo 'Full tokenize OK'
     ls -lh data/bin/
   fi
+"
+
+echo ""
+echo "=== 4. Tiny training run ==="
+
+singularity exec "$SIF" bash -c "
+  set -euo pipefail
+  export PYTHONPATH=$MEGATRON_DIR:\${PYTHONPATH:-}
+  export HF_HOME=$WORKDIR/hf
+  export HF_TOKEN=\$(cat ~/.hf_token 2>/dev/null || true)
+
+  # ROCm settings for LUMI MI250X
+  # Persistent MIOpen cache so autotuning survives across jobs
+  export MIOPEN_USER_DB_PATH=$WORKDIR/miopen_cache
+  export MIOPEN_CUSTOM_CACHE_DIR=\$MIOPEN_USER_DB_PATH
+  mkdir -p \$MIOPEN_USER_DB_PATH
+  # Disable MIOpen autotuning to avoid first-run hang
+  export MIOPEN_FIND_ENFORCE=NONE
+  export NCCL_SOCKET_IFNAME=hsn0,hsn1,hsn2,hsn3
+  export NCCL_NET_GDR_LEVEL=3
+  export ROCR_VISIBLE_DEVICES=0
+
+  # Tokenize 50 docs for training data
+  TRAIN_DIR=$WORKDIR/tmp_train
+  mkdir -p \$TRAIN_DIR
+  head -n 50 $REPO/data/long/mt.jsonl > \$TRAIN_DIR/mt_train.jsonl
+
+  python $MEGATRON_DIR/tools/preprocess_data.py \
+    --input \$TRAIN_DIR/mt_train.jsonl \
+    --output-prefix \$TRAIN_DIR/mt_train \
+    --tokenizer-type HuggingFaceTokenizer \
+    --tokenizer-model openeurollm/tokenizer-256k \
+    --json-keys text \
+    --workers 1 \
+    --append-eod
+  echo Training data tokenized.
+
+  # Tiny GPT from scratch: 4 layers, hidden=256, 5 iterations
+  # vocab-size=262144 matches openeurollm/tokenizer-256k (2^18 tokens)
+  # Use direct Python invocation (avoids torchrun process spawning issues on LUMI)
+  export MASTER_ADDR=localhost
+  export MASTER_PORT=29500
+  export WORLD_SIZE=1
+  export RANK=0
+  export LOCAL_RANK=0
+  python $MEGATRON_DIR/pretrain_gpt.py \
+    --tensor-model-parallel-size 1 \
+    --pipeline-model-parallel-size 1 \
+    --num-layers 4 \
+    --hidden-size 256 \
+    --num-attention-heads 4 \
+    --seq-length 512 \
+    --max-position-embeddings 512 \
+    --micro-batch-size 1 \
+    --global-batch-size 1 \
+    --train-iters 5 \
+    --eval-iters 2 \
+    --eval-interval 5 \
+    --mock-data \
+    --tokenizer-type NullTokenizer \
+    --vocab-size 262144 \
+    --split 900,50,50 \
+    --lr 0.0001 \
+    --min-lr 0.00001 \
+    --lr-decay-style cosine \
+    --log-interval 1 \
+    --no-save-optim \
+    --no-save-rng \
+    --distributed-backend gloo \
+    --transformer-impl local \
+    --no-gradient-accumulation-fusion \
+    --no-bias-dropout-fusion \
+    --no-masked-softmax-fusion \
+    --num-workers 0
+  echo Training OK!
 "
 
 echo ""
