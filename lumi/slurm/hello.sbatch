@@ -82,6 +82,8 @@ singularity exec "$SIF" bash -c "
     TMPDIR=$WORKDIR/tmp_quick
     mkdir -p \$TMPDIR
     head -n 1 data/long/mt.jsonl > \$TMPDIR/mt_quick.jsonl
+    # Prepend the cloned fork so it shadows the container's megatron-core pip package
+    export PYTHONPATH=\$MEGATRON_LM:\${PYTHONPATH:-}
     python \$MEGATRON_LM/tools/preprocess_data.py \
       --input \$TMPDIR/mt_quick.jsonl \
       --output-prefix \$TMPDIR/mt_quick \
