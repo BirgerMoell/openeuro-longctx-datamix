@@ -17,9 +17,31 @@ We are validating the full **OpenEuroLLM long-context data pipeline** on LUMI, a
 1. **Data pipeline** — `longctx estimate → download → convert → filter-long → tokenize`
 2. **Megatron GPT training** — at least 5 training iterations with real loss values
 
-This is a prerequisite before running large-scale multilingual training for the OpenEuroLLM project. The ML framework (NVIDIA Megatron-LM) is designed for NVIDIA GPUs and uses several apex fused CUDA kernels. Our challenge is making it work on AMD/ROCm hardware in the LUMI environment.
+This is a prerequisite before running large-scale multilingual training for the OpenEuroLLM project. The ML framework (NVIDIA Megatron-LM) is designed for NVIDIA GPUs and uses several apex fused CUDA kernels. Our challenge was making it work on AMD/ROCm hardware in the LUMI environment.
 
 The entry point is `lumi/slurm/hello.sbatch`, submitted via `bash lumi/run-lumi.sh hello`.
+
+---
+
+## ✅ FULL STACK VALIDATED (job 18306279)
+
+### Training output — 5 iterations completed
+
+```
+iteration 1/5 | lm loss: 1.253347E+01 | grad norm: 3.203 | elapsed: 16396.5ms
+iteration 2/5 | lm loss: 1.254492E+01 | grad norm: 3.068 | elapsed:   161.4ms
+iteration 3/5 | lm loss: 1.254339E+01 | grad norm: 2.979 | elapsed:    35.4ms
+iteration 4/5 | lm loss: 1.251824E+01 | grad norm: 2.723 | elapsed:    33.9ms
+iteration 5/5 | lm loss: 1.246977E+01 | grad norm: 2.584 | elapsed:    33.2ms
+
+validation loss at iteration 5 | lm loss value: 1.250232E+01 | lm loss PPL: 2.689614E+05
+validation loss at iteration 5 on test set | lm loss value: 1.243491E+01 | lm loss PPL: 2.514279E+05
+Training OK!
+```
+
+**The loss of ~12.48 equals ln(262,144)** — exactly what a freshly initialized model produces at random on a vocab of 262,144 tokens. Grad norm is steadily decreasing (3.203 → 2.584), confirming proper gradient flow. No NaN losses, no skipped iterations.
+
+Iteration 1 takes 16 seconds (MIOpen/rocBLAS kernel compilation); subsequent iterations run at ~33ms each.
 
 ---
 
@@ -35,83 +57,64 @@ The entry point is `lumi/slurm/hello.sbatch`, submitted via `bash lumi/run-lumi.
 | Filter | `longctx filter-long --min-tokens 4096` | ✅ — 5,463 docs kept (33%) |
 | Tokenize (quick) | `preprocess_data.py` with `openeurollm/tokenizer-256k` | ✅ — bin/idx written |
 
-The quick tokenize path writes a single-doc `.bin`/`.idx` file; full tokenization (without `--quick`) also works.
-
-### GPU compute (pure PyTorch)
-
-Tested on MI250X inside the Singularity container:
+### GPU compute
 
 | Test | Result |
 |------|--------|
 | `torch.matmul` 1024×1024 | ✅ ~940ms first call (kernel compile), <1ms after |
-| `nn.Embedding(262144, 64)` + `nn.Linear` + backward (5 iters) | ✅ ~2s first iter, ~3ms after |
+| `nn.Embedding(262144, 64)` + `nn.Linear` + backward (5 iters) | ✅ |
 | `F.scaled_dot_product_attention` (causal, math backend) | ✅ |
-| `gloo dist.barrier()` with WORLD_SIZE=1 | ✅ ~108ms first call, <1ms after |
-| Megatron `DotProductAttention` (QK^T, softmax, attn*V) — all 4 layers | ✅ (confirmed in job 18306279) |
+| Megatron DotProductAttention (all 4 layers) | ✅ |
+| Megatron full forward + backward + optimizer step | ✅ |
 
-### Megatron initialisation and forward pass
+### Megatron GPT training
 
-After applying ROCm compatibility patches (see below), all of the following now work:
-
-- Model and optimizer build
-- DataLoader build (including `--mock-data`)
-- Apex extension compilation (`amp_C`, fused kernels)
-- `[before the start of training step]` log line
-- Full forward pass through all 4 transformer layers (attention + FFN)
-- GPU sync after decoder: confirmed "GPU sync after decoder OK"
-- `_postprocess` (output projection)
-- `finalize_model_grads` called
+Full training loop with 5 iterations, validation, and test evaluation — all complete with real loss values.
 
 ---
 
-## What Was Broken — Root Causes Found and Fixed
+## Bugs Found and Fixed
 
-### Bug 1: GPU crash — wrong vocab size (FIXED)
+Three bugs had to be diagnosed and fixed to get Megatron working on ROCm/MI250X. All are in the Megatron source on the LUMI scratch filesystem.
+
+### Bug 1: Wrong vocab size → GPU crash
 
 **Symptom:** `vectorized_gather_kernel` SIGABRT (out-of-bounds embedding lookup)  
-**Root cause:** The tokenizer `openeurollm/tokenizer-256k` has 262,144 vocab entries (2¹⁸), not 256,001 or 256,128 as initially assumed. Megatron's default `--vocab-size` was wrong.  
-**Fix:** Added `--vocab-size 262144` to pretrain_gpt.py args in hello.sbatch.
+**Root cause:** Tokenizer has 262,144 vocab entries; Megatron was using a smaller default.  
+**Fix:** `--vocab-size 262144` in hello.sbatch.
 
-### Bug 2: NCCL hang (FIXED)
+### Bug 2: NCCL process group hangs on MI250X
 
-**Symptom:** Hang immediately on process group init with "guessing device ID" warning from ProcessGroupNCCL  
-**Root cause:** NCCL can't reliably detect ROCm device IDs in single-GPU Singularity container without explicit device binding.  
-**Fix:** Switched to `--distributed-backend gloo` for single-node/single-GPU use.
+**Symptom:** Training hangs immediately with "guessing device ID" from ProcessGroupNCCL  
+**Root cause:** NCCL can't reliably auto-detect ROCm device IDs inside Singularity without explicit device binding setup.  
+**Fix:** `--distributed-backend gloo` (single-node CPU-based communication).
 
-### Bug 3: apex FusedLayerNorm hangs on MI250X (FIXED)
+### Bug 3: `apex.normalization.FusedLayerNorm` hangs on MI250X ← main blocker
 
-**Symptom:** Training hangs indefinitely with no output after `[DIAG] GPTModel: calling decoder (transformer layers)`. Diagnostic job (`gpu_diag5.sbatch`) confirmed `apex.normalization.FusedLayerNorm` hangs after 6+ minutes with only 2 lines of output.
+**Symptom:** Training hangs indefinitely inside the first transformer layer with zero output.  
+**Root cause:** `megatron/core/fusions/fused_layer_norm.py` calls `FusedLayerNormAffineFunction.apply()` from apex when `hidden_size` is not in a hardcoded list of supported sizes (the list starts at 1024; we use 256). This apex kernel deadlocks on MI250X.
 
-**Root cause:** `megatron/core/fusions/fused_layer_norm.py` calls `FusedLayerNormAffineFunction.apply()` from `apex.normalization` when `hidden_size` is not in the supported list (256 is not supported; the list starts at 1024). This apex CUDA kernel deadlocks on MI250X.
-
-**Fix applied to LUMI Megatron source** (`megatron/core/fusions/fused_layer_norm.py`):
+**Fix** (`megatron/core/fusions/fused_layer_norm.py` — the `else` branch of `FusedLayerNorm.forward()`):
 
 ```python
-# Replaced this:
+# Before (hangs on MI250X):
 return FusedLayerNormAffineFunction.apply(
     input, weight, self.bias, self.hidden_size, self.eps
 )
 
-# With this (in the else branch of forward()):
-# Use PyTorch native layer_norm (apex FusedLayerNormAffineFunction hangs on MI250X)
+# After (uses PyTorch native — no apex kernel):
 return torch.nn.functional.layer_norm(
     input, self.hidden_size, weight, self.bias, self.eps
 )
 ```
 
-After this fix, all 4 transformer layers run through successfully including attention.
+### Bug 4: `allreduce_coalesced` on CUDA tensors unsupported by gloo
 
-### Bug 4: gloo doesn't support allreduce_coalesced for CUDA tensors (FIXED)
+**Symptom:** Crash after backward pass: `ProcessGroupGloo::allreduce_coalesced: unsupported device type cuda`  
+**Root cause:** Megatron's DDP gradient sync batches `all_reduce` calls via `_coalescing_manager`, which internally calls `group.allreduce_coalesced(tensors)`. The gloo backend doesn't support this for CUDA tensors.  
+With WORLD_SIZE=1, gradient synchronization is a no-op anyway.
 
-**Symptom:** Crash after backward pass with `RuntimeError: ProcessGroupGloo::allreduce_coalesced: unsupported device type cuda`
-
-**Root cause:** Megatron's DDP gradient sync calls `_coalescing_manager` which batches multiple `all_reduce` calls and sends them as `allreduce_coalesced`. The gloo backend doesn't support this operation for CUDA tensors.
-
-With WORLD_SIZE=1 (single GPU), no actual gradient synchronization is needed — the all-reduce is a no-op.
-
-**Fix applied to LUMI Megatron source** (`megatron/core/distributed/param_and_grad_buffer.py`):
-
-Added an early return in `start_grad_sync()` when world size is 1:
+**Fix** (`megatron/core/distributed/param_and_grad_buffer.py` — `BucketGroup.start_grad_sync()`):
 
 ```python
 # Skip all-reduce with single process - gloo does not support
@@ -123,48 +126,21 @@ if _dist.get_world_size(group=self.data_parallel_group) == 1:
 
 ---
 
-## Current Status
+## Debugging History (how we found the bugs)
 
-**Job 18306279** is running with both Bug 3 and Bug 4 fixes applied. Awaiting results to confirm 5 training iterations complete with loss values.
+The main hang was inside `self.decoder(...)` (TransformerBlock). We traced it progressively with diagnostic `print()` statements inserted into Megatron source files:
 
-### Previous jobs and what they showed
+1. `training.py`: added `[DIAG] train_step: calling forward_backward_func`
+2. `schedules.py`: added `[DIAG] schedules: calling final forward_step`
+3. `pretrain_gpt.py`: added `[DIAG] forward_step: calling get_batch`
+4. `gpt_model.py`: added prints at `_preprocess`, `decoder`, `_postprocess`
+5. `dot_product_attention.py`: added prints at each operation inside attention
 
-| Job | Purpose | Result |
-|-----|---------|--------|
-| 18277969 | First hello.sbatch | Hung at decoder (FusedLayerNorm) |
-| 18303968 | gpu_diag5 — apex component isolation | Confirmed FusedLayerNorm hangs after 6+ min |
-| 18305680 | First fix attempt (FusedLayerNorm only) | Got past decoder, crashed at allreduce_coalesced |
-| 18306279 | Both fixes | Running — awaiting results |
-
----
-
-## Pending Next Steps
-
-1. **Confirm training completes** — job 18306279 should print 5 iteration loss values
-2. **Clean up Megatron diagnostic patches** — `git checkout` all patched files (training.py, schedules.py, gpt_model.py, dot_product_attention.py)
-3. **Switch from `--mock-data` to real data** — use `--data-path $TRAIN_DIR/mt_train_text_document`
-4. **Verify loss decreases** over 5 iterations
-5. **Commit the final working configuration** to GitHub, including the two ROCm compatibility patches
+The attention prints never appeared — meaning the hang was before `DotProductAttention`. The last thing to run before attention is `input_layernorm` (a `FusedLayerNorm`). A standalone test (`gpu_diag5.sbatch`) confirmed `FusedLayerNorm` hangs after >6 minutes with zero GPU progress.
 
 ---
 
-## ROCm Compatibility Patches Summary
-
-Two source files in the Megatron repo need patches for MI250X/ROCm 7.0:
-
-### Patch 1: `megatron/core/fusions/fused_layer_norm.py`
-
-In `FusedLayerNorm.forward()`, replace the `else` branch (non-persist path, used when `hidden_size` is not in the supported list) to use `torch.nn.functional.layer_norm` instead of `apex.normalization.FusedLayerNormAffineFunction`.
-
-### Patch 2: `megatron/core/distributed/param_and_grad_buffer.py`
-
-In `BucketGroup.start_grad_sync()`, add an early return when `dist.get_world_size(group=self.data_parallel_group) == 1`. This avoids the `allreduce_coalesced` call that gloo doesn't support for CUDA tensors.
-
----
-
-## Current hello.sbatch Configuration
-
-Relevant Megatron flags in Section 4 (tiny training run):
+## Current hello.sbatch Configuration (working)
 
 ```bash
 --num-layers 4 --hidden-size 256 --num-attention-heads 4
@@ -177,18 +153,24 @@ Relevant Megatron flags in Section 4 (tiny training run):
 --num-workers 0
 ```
 
-ROCm env vars set before the training singularity exec:
+ROCm env vars:
 ```bash
 export MIOPEN_USER_DB_PATH=$WORKDIR/miopen_cache
 export MIOPEN_CUSTOM_CACHE_DIR=$WORKDIR/miopen_cache
 export MIOPEN_FIND_ENFORCE=NONE
-export NCCL_SOCKET_IFNAME=hsn0,hsn1,hsn2,hsn3
-export NCCL_NET_GDR_LEVEL=3
 export ROCR_VISIBLE_DEVICES=0
-export MASTER_ADDR=localhost
-export MASTER_PORT=29500
+export MASTER_ADDR=localhost; export MASTER_PORT=29500
 export WORLD_SIZE=1; export RANK=0; export LOCAL_RANK=0
 ```
+
+---
+
+## Next Steps
+
+1. **Clean up diagnostic prints** — `git checkout` all patched Megatron files (training.py, schedules.py, gpt_model.py, dot_product_attention.py). Keep the two bug-fix patches (fused_layer_norm.py, param_and_grad_buffer.py).
+2. **Switch from `--mock-data` to real data** — change to `--data-path $TRAIN_DIR/mt_train_text_document` and confirm loss decreases over 5 iterations.
+3. **Scale up** — increase model size and sequence length toward actual long-context training targets.
+4. **Submit ROCm compatibility patches upstream** — both fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
 
 ---
 
