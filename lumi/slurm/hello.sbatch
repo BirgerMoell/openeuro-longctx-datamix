@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -p small-g
+#SBATCH -p dev-g
 #SBATCH -t 00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -62,6 +62,7 @@ singularity exec "$SIF" bash -c "
   export HF_HOME=$WORKDIR/hf
   export HF_HUB_CACHE=$WORKDIR/hf
   export MEGATRON_LM=$MEGATRON_DIR
+  export HF_TOKEN=\$(cat ~/.hf_token 2>/dev/null || true)
   mkdir -p \$HF_HOME
 
   echo '--- estimate ---'
@@ -88,7 +89,7 @@ singularity exec "$SIF" bash -c "
       --input \$TMPDIR/mt_quick.jsonl \
       --output-prefix \$TMPDIR/mt_quick \
       --tokenizer-type HuggingFaceTokenizer \
-      --tokenizer-model meta-llama/Llama-3.1-8B \
+      --tokenizer-model openeurollm/tokenizer-256k \
       --json-keys text \
       --workers 1 \
       --append-eod
@@ -98,7 +99,7 @@ singularity exec "$SIF" bash -c "
     echo '--- tokenize (full) ---'
     longctx tokenize \
       --tokenizer-type HuggingFaceTokenizer \
-      --tokenizer-model meta-llama/Llama-3.1-8B
+      --tokenizer-model openeurollm/tokenizer-256k
     echo 'Full tokenize OK'
     ls -lh data/bin/
   fi
