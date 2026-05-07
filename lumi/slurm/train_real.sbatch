@@ -33,13 +33,15 @@ export MIOPEN_FIND_ENFORCE=NONE
 export ROCR_VISIBLE_DEVICES=0
 export HF_HOME=$WORKDIR/hf
 export HF_HUB_OFFLINE=1          # tokenizer already cached — no network needed
-# Ensure the local Megatron fork takes precedence over the container's megatron-core
-export PYTHONPATH=$MEGATRON_DIR${PYTHONPATH:+:$PYTHONPATH}
 
 mkdir -p $TRAIN_DIR
 
 # ── 1. Tokenize full corpus ────────────────────────────────────────────────────
 # Skip if already done (bin/idx present and newer than the source JSONL).
+# NOTE: Do NOT set PYTHONPATH here. preprocess_data.py picks up megatron from the
+# container's site-packages (via the tools/ script dir path). Setting PYTHONPATH to
+# the local fork causes a namespace package conflict (local training imports
+# AdamOptimizerConfig from local core, but container core resolves first).
 BIN=$TRAIN_DIR/mt_full_text_document.bin
 if [ -f "$BIN" ] && [ "$BIN" -nt "$REPO/data/long/mt.jsonl" ]; then
   echo "=== Tokenized data already up-to-date, skipping ==="
@@ -51,13 +53,15 @@ else
     --tokenizer-type HuggingFaceTokenizer \
     --tokenizer-model openeurollm/tokenizer-256k \
     --json-keys text \
-    --workers 6 \
+    --workers 1 \
     --append-eod
   echo "Tokenization done. Files:"
   ls -lh $TRAIN_DIR/mt_full_text_document.*
 fi
 
 # ── 2. Train on real data ──────────────────────────────────────────────────────
+# Running pretrain_gpt.py directly causes Python to add $MEGATRON_DIR to sys.path,
+# which ensures the local fork's megatron package (with ROCm fixes) is used.
 echo ""
 echo "=== Training on real data ==="
 
