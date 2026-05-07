@@ -198,9 +198,49 @@ export WORLD_SIZE=1; export RANK=0; export LOCAL_RANK=0
 
 1. ✅ ~~**Clean up diagnostic prints**~~ — done; branch `rocm-mi250x-compat` on `BirgerMoell/NVIDIA-Megatron-LM` contains only the two fixes.
 2. ✅ ~~**Switch from `--mock-data` to real data**~~ — done; job 18479860 confirmed loss drops on real Maltese text.
-3. **Scale up** — increase model size and sequence length toward actual long-context training targets. Add more languages.
-4. **Submit ROCm compatibility patches upstream** — both fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
-5. **Add more languages** — lang_analysis job (18479845) is measuring token length distributions for 16 target languages. Add Swedish, Finnish, and other high-resource languages to the training mix.
+3. ✅ ~~**Language analysis for all 35 languages**~~ — done; jobs 18479845 + 18480711, results in `LANGUAGE_ANALYSIS.md`.
+4. **Tokenize multilingual tiers** — job 18484511 (`tokenize_tiers.sbatch`) running; produces `multilingual_{16k_plus,4_16k,under4k}` bin/idx files.
+5. **YaRN smoke test** — job 18484512 (`yarn_test.sbatch`) running; 10-iteration test of 9B YaRN pipeline on 1 node.
+6. **YaRN multilingual full run** — submit `yarn_multilingual.sbatch` once tokenization completes and the smoke test passes.
+7. **Submit ROCm compatibility patches upstream** — both fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
+
+---
+
+## HuggingFace Conversion — Manual Step Required
+
+After converting a Megatron checkpoint to HuggingFace format, the `rope_scaling` parameters must be **added manually** to `config.json` — the conversion script does not propagate them automatically.
+
+### YaRN (recommended for multilingual)
+
+```json
+"rope_scaling": {
+  "factor": 16.0,
+  "original_max_position_embeddings": 2048,
+  "type": "yarn"
+},
+"rope_theta": 10000
+```
+
+Reference: `/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-9b-80-20-TP-2-PP-4-yarn-finepdfs/checkpoint_0001000/config.json`
+
+### LongRoPE (English-only search, not recommended for multilingual)
+
+LongRoPE requires a 64-element `long_factor` and `short_factor` array obtained by running a search over the target language corpus. Jouni has done this search for English only. The factors are in:
+
+`/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-9b-80-20-TP-2-PP-4-longrope-finepdfs/checkpoint_0001000/config.json`
+
+For multilingual training, use YaRN instead (single scaling factor, no per-language search needed).
+
+---
+
+## Context Extension Strategy
+
+| Method | Megatron arg | HF config type | Notes |
+|--------|-------------|----------------|-------|
+| YaRN | `--position-embedding-type yarn --yarn-scaling-factor 16.0 --yarn-original-max-position-embeddings 2048` | `"yarn"` | Recommended for multilingual — no search needed |
+| LongRoPE | `--position-embedding-type longrope --longrope-rescale-factors-path result_final.csv --longrope-original-max-position-embeddings 2048` | `"longrope"` | Better quality but requires per-language search |
+
+Both extend from 2K → 32K context (scaling factor 16.0 = 32768 / 2048).
 
 ---
 
@@ -208,13 +248,18 @@ export WORLD_SIZE=1; export RANK=0; export LOCAL_RANK=0
 
 ```
 lumi/
-├── run-lumi.sh          # top-level runner: hello / status / logs
-├── slurm/
-│   ├── hello.sbatch     # main end-to-end job (data pipeline + tiny training)
-│   ├── gpu_diag.sbatch  # GPU matmul + tiny PyTorch training (all pass)
-│   ├── gpu_diag2.sbatch # SDPA + DotProductAttention isolation tests
-│   ├── gpu_diag3.sbatch # Megatron with stack-trace timeout wrapper
-│   ├── gpu_diag4.sbatch # gloo barrier + Megatron timer tests
-│   └── gpu_diag5.sbatch # apex component isolation (found FusedLayerNorm hang)
-└── LUMI_STATUS.md       # this file
+├── run-lumi.sh                       # top-level runner: hello / status / logs
+├── LANGUAGE_ANALYSIS.md              # per-language long-context stats (35 languages)
+├── LUMI_STATUS.md                    # this file
+└── slurm/
+    ├── hello.sbatch                  # end-to-end validation job (mock + real data)
+    ├── train_real.sbatch             # Maltese real-data training (validated)
+    ├── lang_analysis.sbatch          # 16-language stats (job 18479845, done)
+    ├── lang_analysis_remaining.sbatch# remaining 19 languages (job 18480711, done)
+    ├── tokenize_tiers.sbatch         # split 35 langs into 3 Megatron tier datasets
+    ├── yarn_test.sbatch              # 10-iter YaRN smoke test (1 node)
+    ├── yarn_multilingual.sbatch      # full YaRN multilingual run (32 nodes)
+    ├── longrope_test.sbatch          # 10-iter LongRoPE smoke test (1 node)
+    ├── longrope_multilingual.sbatch  # full LongRoPE multilingual run (32 nodes)
+    └── gpu_diag*.sbatch              # GPU/ROCm diagnostic jobs
 ```
