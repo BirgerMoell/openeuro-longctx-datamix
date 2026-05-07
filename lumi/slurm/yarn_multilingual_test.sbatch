@@ -131,12 +131,13 @@ RECOMPUTATION=1
 LOG_INTERVAL=1
 SAVE_INTERVAL=10000
 EVAL_INTERVAL=5
-EVAL_ITERS=5
+EVAL_ITERS=2
 
 # ── Build args ────────────────────────────────────────────────────────────────
 DATA_ARGS=(
     --data-path "$DATA_PATH"
     --data-cache-path "$DATA_CACHE_PATH"
+    --split 750,150,100
     --tokenizer-type HuggingFaceTokenizer
     --tokenizer-model "$TOKENIZER_MODEL"
     --make-vocab-size-divisible-by 128
