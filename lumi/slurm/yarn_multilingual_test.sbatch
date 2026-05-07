@@ -85,12 +85,10 @@ mkdir -p "$CHECKPOINT_PATH" "$TENSORBOARD_DIR" "$DATA_CACHE_PATH"
 
 export HF_HOME="$WORKDIR/hf"
 
-# ── Data — our multilingual three-tier tokenized mix ─────────────────────────
+# ── Data — long-context tier only (avoids BlendedMegatronDataset hang in smoke test)
 MULTILINGUAL_DIR=/flash/project_462000963/bmoell/data_tokenized_multilingual
 TOKENIZER_MODEL=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
-DATA_PATH="0.5 ${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document \
-0.3 ${MULTILINGUAL_DIR}/multilingual_4_16k_text_document \
-0.2 ${MULTILINGUAL_DIR}/multilingual_under4k_text_document"
+DATA_PATH="${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document"
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 NUM_LAYERS=32
