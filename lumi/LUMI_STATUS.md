@@ -23,9 +23,9 @@ The entry point is `lumi/slurm/hello.sbatch`, submitted via `bash lumi/run-lumi.
 
 ---
 
-## ✅ FULL STACK VALIDATED (job 18306279)
+## ✅ FULL STACK VALIDATED (job 18306279) — mock data
 
-### Training output — 5 iterations completed
+### Training output — 5 iterations on mock data
 
 ```
 iteration 1/5 | lm loss: 1.253347E+01 | grad norm: 3.203 | elapsed: 16396.5ms
@@ -39,9 +39,38 @@ validation loss at iteration 5 on test set | lm loss value: 1.243491E+01 | lm lo
 Training OK!
 ```
 
-**The loss of ~12.48 equals ln(262,144)** — exactly what a freshly initialized model produces at random on a vocab of 262,144 tokens. Grad norm is steadily decreasing (3.203 → 2.584), confirming proper gradient flow. No NaN losses, no skipped iterations.
+**The loss of ~12.48 equals ln(262,144)** — exactly what a freshly initialized model produces at random on a vocab of 262,144 tokens. Grad norm is steadily decreasing, confirming proper gradient flow.
 
-Iteration 1 takes 16 seconds (MIOpen/rocBLAS kernel compilation); subsequent iterations run at ~33ms each.
+---
+
+## ✅ REAL DATA TRAINING VALIDATED (job 18479860)
+
+### Training output — 20 iterations on real Maltese corpus (5,463 docs)
+
+Tokenized all 5,463 docs from `data/long/mt.jsonl` (~113M tokens) and trained a 4-layer GPT for 20 iterations:
+
+```
+iteration  1/20 | lm loss: 1.250298E+01 | grad norm: 5.748 | elapsed: 14761.3ms
+iteration  2/20 | lm loss: 1.229649E+01 | grad norm: 5.161 | elapsed:   937.1ms
+iteration  3/20 | lm loss: 1.215209E+01 | grad norm: 4.758 | elapsed:    31.7ms
+iteration  5/20 | lm loss: 1.208117E+01 | grad norm: 3.032 | elapsed:    29.3ms
+iteration 10/20 | lm loss: 1.187418E+01 | grad norm: 3.278 | elapsed:    29.0ms
+iteration 15/20 | lm loss: 1.180686E+01 | grad norm: 2.469 | elapsed:    29.4ms
+iteration 20/20 | lm loss: 1.167589E+01 | grad norm: 2.477 | elapsed:    28.2ms
+
+validation loss at iteration 10 | lm loss value: 1.186658E+01 | lm loss PPL: 1.424263E+05
+validation loss at iteration 20 | lm loss value: 1.176503E+01 | lm loss PPL: 1.286733E+05
+validation loss at iteration 20 on validation set | lm loss value: 1.178377E+01 | lm loss PPL: 1.311069E+05
+validation loss at iteration 20 on test set | lm loss value: 1.173791E+01 | lm loss PPL: 1.252302E+05
+=== Done ===
+```
+
+**Loss dropped from 12.50 → 11.68 over 20 iterations** — a decrease of ~0.82 nats, confirming the model is learning from real Maltese text. This is meaningfully below the random baseline of ln(262,144) ≈ 12.48. The grad norm also decreases steadily (5.748 → 2.477).
+
+The full pipeline is now end-to-end validated on real data:
+`download → convert → filter-long → tokenize → Megatron GPT training`
+
+Fix required: `export PYTHONPATH=$MEGATRON_DIR:${PYTHONPATH:-}` inside the singularity heredoc, so `megatron.core` resolves from the local repo rather than the older container pip package (`megatron-core`).
 
 ---
 
@@ -167,10 +196,11 @@ export WORLD_SIZE=1; export RANK=0; export LOCAL_RANK=0
 
 ## Next Steps
 
-1. **Clean up diagnostic prints** — `git checkout` all patched Megatron files (training.py, schedules.py, gpt_model.py, dot_product_attention.py). Keep the two bug-fix patches (fused_layer_norm.py, param_and_grad_buffer.py).
-2. **Switch from `--mock-data` to real data** — change to `--data-path $TRAIN_DIR/mt_train_text_document` and confirm loss decreases over 5 iterations.
-3. **Scale up** — increase model size and sequence length toward actual long-context training targets.
+1. ✅ ~~**Clean up diagnostic prints**~~ — done; branch `rocm-mi250x-compat` on `BirgerMoell/NVIDIA-Megatron-LM` contains only the two fixes.
+2. ✅ ~~**Switch from `--mock-data` to real data**~~ — done; job 18479860 confirmed loss drops on real Maltese text.
+3. **Scale up** — increase model size and sequence length toward actual long-context training targets. Add more languages.
 4. **Submit ROCm compatibility patches upstream** — both fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
+5. **Add more languages** — lang_analysis job (18479845) is measuring token length distributions for 16 target languages. Add Swedish, Finnish, and other high-resource languages to the training mix.
 
 ---
 
