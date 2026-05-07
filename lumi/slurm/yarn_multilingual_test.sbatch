@@ -2,7 +2,7 @@
 #SBATCH --job-name=yarn-multilingual-test
 #SBATCH --cpus-per-task=7
 #SBATCH --ntasks-per-node=8
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --mem=480G
 #SBATCH --partition=standard-g
 #SBATCH --time=00:30:00
@@ -21,8 +21,8 @@
 #   multilingual_4_16k_text_document.{bin,idx}
 #   multilingual_under4k_text_document.{bin,idx}
 #
-# Parallelism: TP=2, PP=4, CP=1  →  1 node × 8 GPUs
-# (CP=4 requires ≥4 nodes; CP=1 fits a single node)
+# Parallelism: TP=2, PP=4, CP=4  →  4 nodes × 8 GPUs = 32 GPUs
+# CP=1 on 1 node is OOM at seq_length=32768 (60 GB / 64 GB used)
 #
 # Submit: sbatch lumi/slurm/yarn_multilingual_test.sbatch
 
@@ -108,7 +108,7 @@ mkdir -p "$SAVE_CKPT_PATH"
 # ── Parallelism (1 node = CP=1, TP=2, PP=4 → 8 GPUs) ─────────────────────────
 PIPELINE_MODEL_PARALLEL_SIZE=4
 TENSOR_MODEL_PARALLEL_SIZE=2
-CONTEXT_PARALLEL_SIZE=1   # CP=4 needs 4+ nodes
+CONTEXT_PARALLEL_SIZE=4
 
 # ── Optimizer ─────────────────────────────────────────────────────────────────
 ADAM_BETA1=0.9
