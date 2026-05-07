@@ -26,28 +26,35 @@ if ! type module &>/dev/null; then source /etc/profile; fi
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 
+mkdir -p $TRAIN_DIR
+
+# Run tokenization and training inside a single bash session within the container,
+# exactly matching hello.sbatch's proven pattern.
+singularity exec "$SIF" bash -s "$WORKDIR" "$REPO" "$MEGATRON_DIR" "$TRAIN_DIR" << 'INNER'
+set -euo pipefail
+WORKDIR=$1
+REPO=$2
+MEGATRON_DIR=$3
+TRAIN_DIR=$4
+
 export MIOPEN_USER_DB_PATH=$WORKDIR/miopen_cache
 export MIOPEN_CUSTOM_CACHE_DIR=$WORKDIR/miopen_cache
 mkdir -p $MIOPEN_USER_DB_PATH
 export MIOPEN_FIND_ENFORCE=NONE
 export ROCR_VISIBLE_DEVICES=0
 export HF_HOME=$WORKDIR/hf
-export HF_HUB_OFFLINE=1          # tokenizer already cached — no network needed
+export HF_HUB_OFFLINE=1
+# Put local Megatron repo first so megatron.core resolves from it, not from the
+# older megatron-core pip package installed in the container.
+export PYTHONPATH=$MEGATRON_DIR:${PYTHONPATH:-}
 
-mkdir -p $TRAIN_DIR
-
-# ── 1. Tokenize full corpus ────────────────────────────────────────────────────
-# Skip if already done (bin/idx present and newer than the source JSONL).
-# NOTE: Do NOT set PYTHONPATH here. preprocess_data.py picks up megatron from the
-# container's site-packages (via the tools/ script dir path). Setting PYTHONPATH to
-# the local fork causes a namespace package conflict (local training imports
-# AdamOptimizerConfig from local core, but container core resolves first).
+# ── 1. Tokenize full corpus ───────────────────────────────────────────────────
 BIN=$TRAIN_DIR/mt_full_text_document.bin
 if [ -f "$BIN" ] && [ "$BIN" -nt "$REPO/data/long/mt.jsonl" ]; then
   echo "=== Tokenized data already up-to-date, skipping ==="
 else
   echo "=== Tokenizing 5,463 docs → $TRAIN_DIR ==="
-  singularity exec "$SIF" python $MEGATRON_DIR/tools/preprocess_data.py \
+  python $MEGATRON_DIR/tools/preprocess_data.py \
     --input  $REPO/data/long/mt.jsonl \
     --output-prefix $TRAIN_DIR/mt_full \
     --tokenizer-type HuggingFaceTokenizer \
@@ -55,23 +62,20 @@ else
     --json-keys text \
     --workers 1 \
     --append-eod
-  echo "Tokenization done. Files:"
+  echo "Tokenization done:"
   ls -lh $TRAIN_DIR/mt_full_text_document.*
 fi
 
-# ── 2. Train on real data ──────────────────────────────────────────────────────
-# Running pretrain_gpt.py directly causes Python to add $MEGATRON_DIR to sys.path,
-# which ensures the local fork's megatron package (with ROCm fixes) is used.
+# ── 2. Train on real data ─────────────────────────────────────────────────────
 echo ""
 echo "=== Training on real data ==="
-
 export MASTER_ADDR=localhost
 export MASTER_PORT=29501
 export WORLD_SIZE=1
 export RANK=0
 export LOCAL_RANK=0
 
-singularity exec "$SIF" python $MEGATRON_DIR/pretrain_gpt.py \
+python $MEGATRON_DIR/pretrain_gpt.py \
   --tensor-model-parallel-size 1 \
   --pipeline-model-parallel-size 1 \
   --num-layers 4 \
@@ -104,3 +108,4 @@ singularity exec "$SIF" python $MEGATRON_DIR/pretrain_gpt.py \
 
 echo ""
 echo "=== Done ==="
+INNER

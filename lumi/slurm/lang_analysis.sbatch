@@ -40,6 +40,11 @@ REPO=$1
 LANGUAGES=$2
 cd "$REPO"
 
+# Set up venv with longctx installed (matches hello.sbatch pattern)
+python -m venv .venv --system-site-packages 2>/dev/null || true
+source .venv/bin/activate
+pip install -q -e . 2>/dev/null
+
 STATS_FILE="$REPO/lang_stats.json"
 echo "{}" > "$STATS_FILE"
 
