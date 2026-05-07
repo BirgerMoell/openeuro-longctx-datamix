@@ -74,6 +74,34 @@ Fix required: `export PYTHONPATH=$MEGATRON_DIR:${PYTHONPATH:-}` inside the singu
 
 ---
 
+## ✅ YaRN MULTILINGUAL SMOKE TEST PASSED (job 18494787)
+
+### Training output — 10 iterations on multilingual ≥16K-token data (35 languages)
+
+4 nodes × 8 GPUs = 32 GPUs, TP=2, PP=4, CP=4, seq_length=32768, GBS=8
+
+```
+iteration  3/10 | lm loss: 1.328448E+01 | grad norm: 20.751 | elapsed: 18913.4ms | 34.2 TFLOP/s/GPU
+iteration  4/10 | lm loss: 1.322131E+01 | grad norm: 12.566 | elapsed: 18833.1ms | 34.3 TFLOP/s/GPU
+iteration  5/10 | lm loss: 1.287841E+01 | grad norm: 12.982 | elapsed: 18866.6ms | 34.3 TFLOP/s/GPU
+validation loss at iteration  5 | lm loss: 1.280456E+01 | PPL: 3.638735E+05
+iteration  6/10 | lm loss: 1.264119E+01 | grad norm: 22.707 | elapsed: 18816.7ms | 34.4 TFLOP/s/GPU
+iteration  7/10 | lm loss: 1.284148E+01 | grad norm: 79.808 | elapsed: 18807.2ms | 34.4 TFLOP/s/GPU
+iteration  8/10 | lm loss: 1.250232E+01 | grad norm: 14.550 | elapsed: 18830.2ms | 34.3 TFLOP/s/GPU
+iteration  9/10 | lm loss: 1.211069E+01 | grad norm: 13.883 | elapsed: 18845.6ms | 34.3 TFLOP/s/GPU
+iteration 10/10 | lm loss: 1.165134E+01 | grad norm: 34.423 | elapsed: 18840.2ms | 34.3 TFLOP/s/GPU
+validation loss at iteration 10 | lm loss: 1.152394E+01 | PPL: 1.011075E+05
+```
+
+**Loss dropped from 13.28 → 11.65 over 10 iterations.** The model is learning from multilingual 32K-context data across 35 European languages. Checkpoint saved at iteration 10.
+
+**Bugs encountered and fixed before reaching this state:**
+1. **BlendedMegatronDataset hang** — 3-tier blended data hangs rank 0 for 30+ min building weights; other ranks SIGABRT at NCCL watchdog. Fix: use single 16k_plus tier for smoke test.
+2. **GPTDataset test-split starvation** — default split 969/30/1 gives 0.1% to test; with 175 docs that's <1 doc; builder hangs. Fix: `--split 750,150,100` + `--eval-iters 2`.
+3. **OOM at CP=1 on 1 node** — 32K seqlen fills 60/64 GB GPU memory before first forward pass. Fix: 4 nodes with CP=4 (splits sequence 4-ways, 4× lower activation memory).
+
+---
+
 ## What Works ✅
 
 ### Data pipeline (all stages pass cleanly)
@@ -199,10 +227,11 @@ export WORLD_SIZE=1; export RANK=0; export LOCAL_RANK=0
 1. ✅ ~~**Clean up diagnostic prints**~~ — done; branch `rocm-mi250x-compat` on `BirgerMoell/NVIDIA-Megatron-LM` contains only the two fixes.
 2. ✅ ~~**Switch from `--mock-data` to real data**~~ — done; job 18479860 confirmed loss drops on real Maltese text.
 3. ✅ ~~**Language analysis for all 35 languages**~~ — done; jobs 18479845 + 18480711, results in `LANGUAGE_ANALYSIS.md`.
-4. **Tokenize multilingual tiers** — job 18484511 (`tokenize_tiers.sbatch`) running; produces `multilingual_{16k_plus,4_16k,under4k}` bin/idx files.
-5. **YaRN smoke test** — job 18484512 (`yarn_test.sbatch`) running; 10-iteration test of 9B YaRN pipeline on 1 node.
-6. **YaRN multilingual full run** — submit `yarn_multilingual.sbatch` once tokenization completes and the smoke test passes.
-7. **Submit ROCm compatibility patches upstream** — both fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
+4. ✅ ~~**Tokenize multilingual tiers (mini)**~~ — done; `tokenize_tiers_mini.sbatch` produced 175 docs in `multilingual_16k_plus_text_document` (16K+ token tier) from 50 docs × 35 languages using lumi-multitorch SIF.
+5. ✅ ~~**YaRN multilingual smoke test**~~ — done; job 18494787, 10 iterations, loss 13.28 → 11.65, checkpoint saved.
+6. **Tokenize full multilingual tiers** — submit `tokenize_tiers.sbatch` to tokenize all 35 language JSONL files into 3 Megatron tier datasets (this will take ~8h on standard-g).
+7. **YaRN multilingual full run** — submit `yarn_multilingual.sbatch` once full tokenization completes. Fix language balance issue first (see PROJECT_STATUS.md Phase 2).
+8. **Submit ROCm compatibility patches upstream** — fixes should be contributed back to OpenEuroLLM/NVIDIA-Megatron-LM.
 
 ---
 

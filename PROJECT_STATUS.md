@@ -28,18 +28,14 @@ The pipeline has two main components:
 | Language analysis for all 35 FinePDFs-Edu languages | Full stats in `lumi/LANGUAGE_ANALYSIS.md` |
 | 3 ROCm/MI250X bugs found and fixed in Megatron | See `lumi/LUMI_STATUS.md` — vocab size, NCCL gloo, FusedLayerNorm apex hang |
 | Mini multilingual tokenization (3 tiers, 35 languages) | `tokenize_tiers_mini.sbatch` produces valid Megatron bin/idx files using lumi-multitorch SIF |
+| YaRN multilingual smoke test (job 18494787) | 10 iterations, 4 nodes × 8 GPUs, CP=4, 32K seqlen — loss 13.28 → 11.65, checkpoint saved |
 
-### 🔄 In Progress
-
-| Job | Description | Status |
-|-----|-------------|--------|
-| yarn_multilingual_test (18494663) | 10-iteration smoke test of YaRN 9B on multilingual 16k_plus data | Running on `dev-g` |
-
-### 📋 Ready to Submit (awaiting smoke test)
+### 📋 Ready to Submit
 
 | Script | Prerequisite | Description |
 |--------|-------------|-------------|
-| `yarn_multilingual.sbatch` | smoke test pass | Full 32-node YaRN multilingual training run |
+| `tokenize_tiers.sbatch` | None | Full tokenization of all 35 language JSONL → 3 Megatron tier datasets (~8h) |
+| `yarn_multilingual.sbatch` | tokenize_tiers + language balance fix | Full 32-node YaRN multilingual training run |
 | `longrope_search_tokenize.sbatch` | None | Build multilingual proxy dataset for LongRoPE search |
 | `longrope_search.sbatch` | longrope_search_tokenize complete | Genetic algorithm search for multilingual RoPE factors |
 
