@@ -50,6 +50,7 @@ OUT_DIR=$4
 TIER_TMP=$5
 
 export PYTHONPATH=$MEGATRON_DIR:${PYTHONPATH:-}
+export TOKENIZERS_PARALLELISM=false   # prevent HF fast tokenizer from forking unsafely
 export MIOPEN_USER_DB_PATH="/tmp/$(whoami)-miopen-cache"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p $MIOPEN_USER_DB_PATH
@@ -69,8 +70,9 @@ out_long  = sys.argv[2]
 out_med   = sys.argv[3]
 out_short = sys.argv[4]
 
-# Read at most this many lines per language file — keeps runtime under 10 minutes
-MAX_DOCS_PER_LANG = 500
+# Read at most this many lines per language file — low enough to stay under
+# 1000 docs per tier and avoid multiprocessing pool worker respawn crash
+MAX_DOCS_PER_LANG = 50
 
 jsonl_files = sorted(glob.glob(os.path.join(data_dir, "*.jsonl")))
 print(f"Found {len(jsonl_files)} language JSONL files (sampling first {MAX_DOCS_PER_LANG} docs each)")
