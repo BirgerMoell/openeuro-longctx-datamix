@@ -3,14 +3,14 @@
 **Date:** 2026-05-07  
 **Pipeline:** OpenEuroLLM long-context data pipeline (`longctx` CLI)  
 **Tokenizer:** `openeurollm/tokenizer-256k` (vocab size 262,144)  
-**Source dataset:** CulturaX / OPUS (1 sample shard per language)  
-**LUMI job:** 18479845 — completed 2026-05-07 11:17 EEST
+**Source dataset:** `HuggingFaceFW/finepdfs-edu` (PDF-derived documents, 1 sample shard per language)  
+**LUMI jobs:** 18479845 (16 languages, completed) · 18480711 (remaining 22 languages, in progress)
 
 ---
 
 ## Summary
 
-We measured token length distributions for all 16 target languages of OpenEuroLLM across 1 sample shard each. The results are actual measurements, not estimates.
+We measured token length distributions for 16 of the 38 OpenEuroLLM target languages across 1 sample shard each. Analysis of the remaining 22 languages is running (LUMI job 18480711). All results are actual measurements from `HuggingFaceFW/finepdfs-edu` — a PDF-derived corpus where documents are naturally long (research papers, legal texts, reports). The 3 languages absent from FinePDFs-Edu (Irish/ga, Albanian/sq, Luxembourgish/lb) are fetched via HPLT instead.
 
 **Key finding:** All 16 languages combined (1 shard each) yield **~302,600 documents ≥4K tokens**, **~55,000 documents ≥32K tokens**, and **~8,000 documents ≥128K tokens** from **8.64 billion total tokens**. This is sufficient for solid long-context training up to 32K with multi-language mixing.
 
@@ -76,7 +76,7 @@ These numbers scale linearly with the number of shards downloaded. Most language
 | da (Danish) | 73,860 | 584.3 | 1,787 | 17,062 | 22,791 | 3,469 | 466 | 1.8M |
 | fi (Finnish) | 46,199 | 574.5 | 2,419 | 30,820 | 17,988 | 4,351 | 471 | **4.98M** |
 
-Swedish and Danish have the most total documents. Finnish has the heaviest right tail (p90=30K, max=5M) — likely due to large wiki articles and official documents in CulturaX. Finnish's agglutinative morphology also means tokens represent more text per token, leading to denser documents.
+Swedish and Danish have the most total documents. Finnish has the heaviest right tail (p90=30K, max=5M) — likely due to long government documents, academic papers, and official reports in FinePDFs-Edu. Finnish's agglutinative morphology also means tokens represent more text per token, leading to denser documents.
 
 ### Baltic Group
 
@@ -259,4 +259,10 @@ A practical curriculum for long-context continual pre-training:
 └── lang_stats.json                     # Full per-language stats (all 16 languages)
 ```
 
-The complete statistics are in `lang_stats.json` at the repo root on LUMI.
+The complete statistics are in `lang_stats.json` at the repo root on LUMI. This file will be updated with the remaining 22 languages once job 18480711 completes.
+
+## Source Dataset
+
+All data comes from **`HuggingFaceFW/finepdfs-edu`** — a PDF-extracted corpus covering 35 of the 38 OpenEuroLLM target languages. PDFs are inherently long-form (research papers, legal documents, government reports, technical manuals), which is why document lengths here are substantially longer than typical web-scraped corpora like CulturaX or mC4.
+
+The 3 languages not present in FinePDFs-Edu (Irish/ga, Albanian/sq, Luxembourgish/lb) are available via `longctx sources fetch --source hplt` which pulls from `HPLT/HPLT2.0_cleaned` (ungated, no token required).
