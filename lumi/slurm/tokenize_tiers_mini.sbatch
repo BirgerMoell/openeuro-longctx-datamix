@@ -134,7 +134,7 @@ for TIER in "long:$LONG_JSONL:multilingual_16k_plus" \
     --tokenizer-type HuggingFaceTokenizer \
     --tokenizer-model "$TOKENIZER" \
     --json-keys     text \
-    --workers       4 \
+    --workers       1 \
     --append-eod
   echo "  Done: $(ls -lh ${OUT_PREFIX}_text_document.bin 2>/dev/null || echo 'no bin')"
 done
