@@ -1,0 +1,257 @@
+#!/bin/bash
+#SBATCH --job-name=longrope-test
+#SBATCH --cpus-per-task=7
+#SBATCH --ntasks-per-node=8
+#SBATCH --nodes=1
+#SBATCH --mem=480G
+#SBATCH --partition=standard-g
+#SBATCH --time=00:30:00
+#SBATCH --exclusive
+#SBATCH --gpus-per-node=8
+#SBATCH --account=project_462000963
+#SBATCH -o /scratch/project_462000963/bmoell/longrope-test-%j.out
+#SBATCH -e /scratch/project_462000963/bmoell/longrope-test-%j.err
+
+# Tiny 10-iteration smoke test for the 9B LongRoPE training pipeline.
+# Uses Jouni's existing English (FinePDFs-Edu) tokenized data — no need to
+# wait for our multilingual tokenization to finish.
+#
+# Parallelism: TP=2, PP=4, CP=1  →  1 node × 8 GPUs
+# (CP=4 requires ≥4 nodes; CP=1 fits a single node)
+#
+# IMPORTANT: save path is in bmoell's scratch — NOT Jouni's checkpoint dir.
+#
+# Submit: sbatch lumi/slurm/longrope_test.sbatch
+
+set -euo pipefail
+
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+    mkdir -p /scratch/project_462000963/bmoell/logs
+    sbatch "$0" "$@"
+    exit
+fi
+
+timestamp=$(date +"%Y-%m-%d_%H-%M-%S")
+logbase="longrope-test-${SLURM_JOBID}-${timestamp}"
+ln -sf "/scratch/project_462000963/bmoell/longrope-test-${SLURM_JOBID}.out" \
+       "/scratch/project_462000963/bmoell/longrope-test-latest.out" 2>/dev/null || true
+
+module purge
+
+# ── Environment ──────────────────────────────────────────────────────────────
+export CONTAINER=/scratch/project_462000963/containers/staging/rocm-6.4.4-pytorch-2.9.1-te-2.4.0-fa-2.8.0.sif
+export BIND_DIRS=/pfs,/scratch,/projappl,/project,/flash,/appl,/opt/cray,/var/spool/slurmd
+
+export ROCM_PATH=/opt/rocm-6.4.4
+export LD_LIBRARY_PATH="$ROCM_PATH/lib:/usr/lib:${LD_LIBRARY_PATH:-}"
+BIND_DIRS="${BIND_DIRS},/opt/rocm/lib/librccl.so:/opt/venv/lib/python3.12/site-packages/torch/lib/librccl.so"
+
+export PYTHONUSERBASE=""
+export CC=gcc
+export CXX=g++
+
+c="fe"
+BIND_MASK="0x${c}000000000000,0x${c}00000000000000,0x${c}0000,0x${c}000000,0x${c},0x${c}00,0x${c}00000000,0x${c}0000000000"
+
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_PORT=9999
+export WORLD_SIZE=$SLURM_NTASKS
+export OMP_NUM_THREADS=2
+export HSA_ENABLE_SDMA=0
+
+export NCCL_SOCKET_IFNAME=hsn0,hsn1,hsn2,hsn3
+export NCCL_NET_GDR_LEVEL=PHB
+export HSA_FORCE_FINE_GRAIN_PCIE=1
+export FI_HMEM=rocr
+export FI_HMEM_ROCR_USE_DMABUF=0
+export FI_MR_CACHE_MONITOR=userfaultfd
+export FI_CXI_DEFAULT_CQ_SIZE=131072
+export PYTHONWARNINGS=ignore
+export NVTE_DEBUG=0
+export NVTE_DEBUG_LEVEL=0
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+WORKDIR=/scratch/project_462000963/bmoell
+MEGATRON_DIR=/flash/project_462000963/jouni/test/NVIDIA-Megatron-LM
+LAUNCH_SCRIPT=/flash/project_462000963/jouni/oellm/launch.sh
+
+OUTPUT_DIR=$WORKDIR/longrope-test-output
+CHECKPOINT_PATH=$OUTPUT_DIR/checkpoints
+TENSORBOARD_DIR=$OUTPUT_DIR/tensorboard
+DATA_CACHE_PATH=$OUTPUT_DIR/cache
+mkdir -p "$CHECKPOINT_PATH" "$TENSORBOARD_DIR" "$DATA_CACHE_PATH"
+
+export HF_HOME="$WORKDIR/hf"
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+# Reuse Jouni's existing English tokenized data (three tiers, 50/30/20 weights)
+FINEPDFS_ROOT=/flash/project_462000963/jouni/oellm
+TOKENIZER_MODEL=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
+DATA_PATH="0.5 ${FINEPDFS_ROOT}/finepdfs-edu-eng-oellm-60-40-tokenized_16-64k-megatron_text_document \
+0.3 ${FINEPDFS_ROOT}/finepdfs-edu-eng-oellm-60-40-tokenized_4-16k-megatron_text_document \
+0.2 ${FINEPDFS_ROOT}/finepdfs-edu-eng-oellm-60-40-tokenized_under4k-megatron_text_document"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+NUM_LAYERS=32
+HIDDEN_SIZE=4096
+FFN_HIDDEN_SIZE=14336
+NUM_ATTENTION_HEADS=32
+NUM_QUERY_GROUPS=32
+TIE_WORD_EMBEDDINGS=1
+INIT_METHOD_STD=0.02
+SEQ_LENGTH=32768
+ROTARY_BASE=10000
+
+LOAD_CKPT_PATH=/flash/project_462000963/jouni/checkpoints/oellm-9b-80-20-TP-2-PP-4
+# bmoell's save path — NOT Jouni's checkpoint directory
+SAVE_CKPT_PATH=$CHECKPOINT_PATH
+mkdir -p "$SAVE_CKPT_PATH"
+
+# ── Parallelism (1 node = CP=1, TP=2, PP=4 → 8 GPUs) ─────────────────────────
+PIPELINE_MODEL_PARALLEL_SIZE=4
+TENSOR_MODEL_PARALLEL_SIZE=2
+CONTEXT_PARALLEL_SIZE=1   # CP=4 needs 4+ nodes; using 1 for single-node test
+
+# ── Optimizer ─────────────────────────────────────────────────────────────────
+ADAM_BETA1=0.9
+ADAM_BETA2=0.95
+ADAM_EPS=1e-8
+LR=1e-5
+MIN_LR=1e-7
+CLIP_GRAD=1.0
+WEIGHT_DECAY=0.05
+
+# ── Training (10 iterations, skip WSD derived math) ───────────────────────────
+GLOBAL_BATCH_SIZE=8    # reduced from 128 to fit memory on 1 node
+MICRO_BATCH_SIZE=1
+TRAIN_ITERS=10
+LR_WARMUP_ITERS=2
+LR_DECAY_ITERS=10
+LR_WSD_DECAY_ITERS=2
+RECOMPUTATION=1
+
+# ── Output ────────────────────────────────────────────────────────────────────
+LOG_INTERVAL=1
+SAVE_INTERVAL=10000   # don't save during 10-iteration test
+EVAL_INTERVAL=5
+EVAL_ITERS=5
+
+# ── Build args ────────────────────────────────────────────────────────────────
+DATA_ARGS=(
+    --data-path "$DATA_PATH"
+    --data-cache-path "$DATA_CACHE_PATH"
+    --tokenizer-type HuggingFaceTokenizer
+    --tokenizer-model "$TOKENIZER_MODEL"
+    --make-vocab-size-divisible-by 128
+    --dataloader-type single
+    --num-workers 1
+)
+
+MODEL_ARGS=(
+    --num-layers $NUM_LAYERS
+    --hidden-size $HIDDEN_SIZE
+    --ffn-hidden-size $FFN_HIDDEN_SIZE
+    --num-attention-heads $NUM_ATTENTION_HEADS
+)
+
+MODEL_ARGS+=(
+    --use-flash-attn
+    --attention-softmax-in-fp32
+    --max-position-embeddings $SEQ_LENGTH
+    --seq-length $SEQ_LENGTH
+    --position-embedding-type longrope
+    --longrope-original-max-position-embeddings 2048
+    --longrope-rescale-factors-path /flash/project_462000963/jouni/test/poro2-longrope-search/results/llama3-search2-8B-mn-oellm-9b/result_final.csv
+    --rotary-base $ROTARY_BASE
+    --disable-bias-linear
+    --init-method-std $INIT_METHOD_STD
+    --attention-dropout 0.0
+    --hidden-dropout 0.0
+    --normalization RMSNorm
+    --micro-batch-size $MICRO_BATCH_SIZE
+    --global-batch-size $GLOBAL_BATCH_SIZE
+    --train-iters $TRAIN_ITERS
+    --bf16
+    --swiglu
+    --no-async-tensor-model-parallel-allreduce
+    --no-masked-softmax-fusion
+    --no-gradient-accumulation-fusion
+    --no-bias-dropout-fusion
+    --no-rope-fusion
+    --distributed-timeout-minutes 30
+    --overlap-grad-reduce
+    --empty-unused-memory-level 2
+    --no-load-optim
+    --no-load-rng
+    --recompute-activations
+)
+
+PARALLEL_ARGS=(
+    --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
+    --pipeline-model-parallel-size $PIPELINE_MODEL_PARALLEL_SIZE
+    --context-parallel-size $CONTEXT_PARALLEL_SIZE
+    --sequence-parallel
+    --use-distributed-optimizer
+    --num-layers-per-virtual-pipeline-stage 1
+)
+
+OPTIMIZER_ARGS=(
+    --optimizer adam
+    --adam-beta1 $ADAM_BETA1
+    --adam-beta2 $ADAM_BETA2
+    --adam-eps $ADAM_EPS
+    --lr $LR
+    --min-lr $MIN_LR
+    --lr-decay-style WSD
+    --lr-wsd-decay-style linear
+    --lr-warmup-iters $LR_WARMUP_ITERS
+    --lr-decay-iters $LR_DECAY_ITERS
+    --lr-wsd-decay-iters $LR_WSD_DECAY_ITERS
+    --clip-grad $CLIP_GRAD
+    --weight-decay $WEIGHT_DECAY
+)
+
+OUTPUT_ARGS=(
+    --eval-interval $EVAL_INTERVAL
+    --eval-iters $EVAL_ITERS
+    --tensorboard-dir "$TENSORBOARD_DIR"
+    --tensorboard-queue-size 5
+    --log-throughput
+    --log-progress
+    --log-interval $LOG_INTERVAL
+)
+
+CHECKPOINT_ARGS=(
+    --ckpt-format torch
+    --load "$LOAD_CKPT_PATH"
+    --save "$SAVE_CKPT_PATH"
+    --save-interval $SAVE_INTERVAL
+)
+
+COMMAND="
+    $MEGATRON_DIR/pretrain_gpt.py
+    ${MODEL_ARGS[@]}
+    ${OPTIMIZER_ARGS[@]}
+    ${PARALLEL_ARGS[@]}
+    ${OUTPUT_ARGS[@]}
+    ${CHECKPOINT_ARGS[@]}
+    ${DATA_ARGS[@]}
+"
+
+echo '============= COMMAND: ============='
+echo "$COMMAND"
+echo '===================================='
+echo "START $SLURM_JOBID: $(date)"
+echo "SLURM_NNODES: $SLURM_NNODES"
+
+srun \
+    --label \
+    --cpu-bind=mask_cpu:$BIND_MASK \
+    singularity exec \
+    -B "$BIND_DIRS" \
+    "$CONTAINER" \
+    "$LAUNCH_SCRIPT" \
+    $COMMAND
+
+echo "END $SLURM_JOBID: $(date)"
