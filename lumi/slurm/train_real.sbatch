@@ -33,6 +33,8 @@ export MIOPEN_FIND_ENFORCE=NONE
 export ROCR_VISIBLE_DEVICES=0
 export HF_HOME=$WORKDIR/hf
 export HF_HUB_OFFLINE=1          # tokenizer already cached — no network needed
+# Ensure the local Megatron fork takes precedence over the container's megatron-core
+export PYTHONPATH=$MEGATRON_DIR${PYTHONPATH:+:$PYTHONPATH}
 
 mkdir -p $TRAIN_DIR
 
