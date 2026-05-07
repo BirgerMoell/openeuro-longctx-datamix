@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-CONTAINER=/scratch/project_462000963/containers/staging/rocm-6.4.4-pytorch-2.9.1-te-2.4.0-fa-2.8.0.sif
+SIF=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260415_130625/lumi-multitorch-full-u24r70f21m50t210-20260415_130625.sif
 WORKDIR=/scratch/project_462000963/bmoell
 REPO=$WORKDIR/openeuro-longctx-datamix
 MEGATRON_DIR=/flash/project_462000963/jouni/test/NVIDIA-Megatron-LM
@@ -32,15 +32,16 @@ TOKENIZER=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm
 OUT_DIR=/flash/project_462000963/bmoell/data_tokenized_multilingual
 TIER_TMP=$WORKDIR/tier_jsonl_tmp_mini
 
+if ! type module &>/dev/null; then source /etc/profile; fi
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
 mkdir -p "$OUT_DIR" "$TIER_TMP"
 
 echo "=== Tokenize multilingual tiers (MINI) — $(date) ==="
 
-BIND_DIRS="/pfs,/scratch,/projappl,/project,/flash,/appl,/opt/cray,/var/spool/slurmd"
-
 singularity exec \
-  -B "$BIND_DIRS" \
-  "$CONTAINER" \
+  "$SIF" \
   bash -s "$REPO" "$MEGATRON_DIR" "$TOKENIZER" "$OUT_DIR" "$TIER_TMP" << 'INNER'
 set -euo pipefail
 REPO=$1
