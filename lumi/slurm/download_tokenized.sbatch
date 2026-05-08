@@ -222,7 +222,7 @@ import numpy as np
 
 lang_tier_stats = {}
 for bin_f in sorted(merged_dir.glob("*_text_document.bin")):
-    prefix = str(bin_f).replace("_text_document.bin", "")
+    prefix = str(bin_f).replace(".bin", "")   # keep _text_document in prefix
     name = bin_f.stem.replace("_text_document", "")
     try:
         ds = IndexedDataset(prefix)
