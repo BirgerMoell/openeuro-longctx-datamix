@@ -46,6 +46,11 @@ OUT_DIR=/flash/project_462000963/bmoell/data_tokenized_hf_multilingual
 HF_DATASET=birgermoell/oellm-longctx-tokenized-streamed-all-v2
 HF_RUN=lc16k_full_20260507
 
+# Optional: restrict to one language for smoke testing.
+# Pass as: sbatch --export=ALL,LANGUAGES_FILTER=et download_tokenized.sbatch
+# Leave empty to download all 8 languages.
+LANGUAGES_FILTER=${LANGUAGES_FILTER:-""}
+
 if ! type module &>/dev/null; then source /etc/profile; fi
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
@@ -59,16 +64,17 @@ echo "Run:     $HF_RUN"
 echo "Output:  $OUT_DIR"
 
 singularity exec "$SIF" python3 -u - \
-    "$HF_DATASET" "$HF_RUN" "$OUT_DIR" "$MEGATRON_DIR" "$HF_HOME" \
+    "$HF_DATASET" "$HF_RUN" "$OUT_DIR" "$MEGATRON_DIR" "$HF_HOME" "${LANGUAGES_FILTER}" \
 << 'PYEOF'
 import sys, os, re, json, shutil
 from pathlib import Path
 
-dataset_id = sys.argv[1]
-run_name   = sys.argv[2]
-out_dir    = sys.argv[3]
-megatron   = sys.argv[4]
-hf_home    = sys.argv[5]
+dataset_id       = sys.argv[1]
+run_name         = sys.argv[2]
+out_dir          = sys.argv[3]
+megatron         = sys.argv[4]
+hf_home          = sys.argv[5]
+languages_filter = [l.strip() for l in sys.argv[6].split(",") if l.strip()] if len(sys.argv) > 6 and sys.argv[6] else []
 
 os.environ["HF_HOME"] = hf_home
 os.environ["PYTHONPATH"] = f"{megatron}:{os.environ.get('PYTHONPATH','')}"
@@ -85,6 +91,12 @@ all_files = list(list_repo_files(dataset_id, repo_type="dataset"))
 run_prefix = f"runs/{run_name}/bin/"
 target_files = [f for f in all_files if f.startswith(run_prefix) and
                 (f.endswith(".bin") or f.endswith(".idx"))]
+
+if languages_filter:
+    target_files = [f for f in target_files
+                    if any(f"_{lang}_" in Path(f).name for lang in languages_filter)]
+    print(f"Language filter active: {languages_filter}")
+
 print(f"Found {len(target_files)} bin/idx files to download")
 
 # ── Step 2: download and sort into per-lang-tier directories ─────────────────
@@ -201,13 +213,49 @@ for e in entries[:3]:
     print(f"  {e}")
 print(f"  ... ({len(entries)} total entries)")
 
-# ── Step 5: summary ────────────────────────────────────────────────────────
+# ── Step 5: document-length report (from .idx files) ─────────────────────────
+# Each merged .idx stores per-document token counts as int32 arrays.
+# This confirms rebinning is possible at any future tier boundary.
+print(f"\n=== Step 5: document length report ===")
+from megatron.core.datasets.indexed_dataset import IndexedDataset
+import numpy as np
+
+lang_tier_stats = {}
+for bin_f in sorted(merged_dir.glob("*_text_document.bin")):
+    prefix = str(bin_f).replace("_text_document.bin", "")
+    name = bin_f.stem.replace("_text_document", "")
+    try:
+        ds = IndexedDataset(prefix)
+        lengths = ds.sequence_lengths  # numpy int32 array, one entry per doc
+        lang_tier_stats[name] = {
+            "docs": len(lengths),
+            "tokens": int(lengths.sum()),
+            "min": int(lengths.min()),
+            "median": int(np.median(lengths)),
+            "p90": int(np.percentile(lengths, 90)),
+            "max": int(lengths.max()),
+        }
+        s = lang_tier_stats[name]
+        print(f"  {name}: {s['docs']:,} docs | {s['tokens']/1e6:.0f}M tokens | "
+              f"min={s['min']} med={s['median']} p90={s['p90']} max={s['max']}")
+    except Exception as e:
+        print(f"  {name}: ERROR reading idx — {e}")
+
+# Write length stats as JSON for future rebinning
+stats_file = Path(out_dir) / "length_stats.json"
+stats_file.write_text(json.dumps(lang_tier_stats, indent=2))
+print(f"\nLength stats written to: {stats_file}")
+
+# ── Step 6: summary ────────────────────────────────────────────────────────
 print(f"\n=== Summary ===")
 bin_files = list(merged_dir.glob("*.bin"))
 total_size = sum(f.stat().st_size for f in bin_files)
 print(f"Merged files: {len(bin_files)}")
 print(f"Total size:   {total_size/1e9:.1f} GB")
-print(f"\n=== Done — $(date) ===")
+print(f"\n=== Done ===")
+
+print(f"\nTo rebin at different boundaries, use length_stats.json as input.")
+print(f"Each merged .idx stores per-doc token counts via dataset.sequence_lengths.")
 PYEOF
 
 echo ""
