@@ -1,6 +1,6 @@
 # OpenEuroLLM Long-Context Data Pipeline — Project Status
 
-**Last updated:** 2026-05-07  
+**Last updated:** 2026-05-08  
 **Author:** Birger Moëll (AI Sweden) in collaboration with Jouni Luoma (TurkuNLP)  
 **Compute:** LUMI supercomputer (CSC), AMD Instinct MI300X, `standard-g` partition
 
@@ -17,7 +17,7 @@ The pipeline has two main components:
 
 ---
 
-## Current State (2026-05-07)
+## Current State (2026-05-08)
 
 ### ✅ Fully Validated
 
@@ -30,12 +30,17 @@ The pipeline has two main components:
 | Mini multilingual tokenization (3 tiers, 35 languages) | `tokenize_tiers_mini.sbatch` produces valid Megatron bin/idx files using lumi-multitorch SIF |
 | YaRN multilingual smoke test (job 18494787) | 10 iterations, 4 nodes × 8 GPUs, CP=4, 32K seqlen — loss 13.28 → 11.65, checkpoint saved |
 
-### 📋 Ready to Submit
+### 📋 Ready to Submit (fast path via pre-tokenized HF dataset)
+
+We discovered that `birgermoell/oellm-longctx-tokenized-streamed-all-v2` on HuggingFace
+contains **pre-tokenized Megatron bin/idx files** for 8 European languages, ready to use
+directly. This skips `tokenize_tiers.sbatch` for those languages.
 
 | Script | Prerequisite | Description |
 |--------|-------------|-------------|
-| `tokenize_tiers.sbatch` | None | Full tokenization of all 35 language JSONL → 3 Megatron tier datasets (~8h) |
-| `yarn_multilingual.sbatch` | tokenize_tiers + language balance fix | Full 32-node YaRN multilingual training run |
+| `download_tokenized.sbatch` | None | Download 8-language pre-tokenized data (~114 GB) from HF, merge per lang/tier, write data_path.args |
+| `yarn_multilingual.sbatch` | download_tokenized complete | Full 32-node YaRN multilingual training run |
+| `tokenize_tiers.sbatch` | None | Full tokenization of remaining 27 languages → 3 Megatron tier datasets (parallel path) |
 | `longrope_search_tokenize.sbatch` | None | Build multilingual proxy dataset for LongRoPE search |
 | `longrope_search.sbatch` | longrope_search_tokenize complete | Genetic algorithm search for multilingual RoPE factors |
 
@@ -43,7 +48,40 @@ The pipeline has two main components:
 
 ## The Data
 
-**Source:** `HuggingFaceFW/finepdfs-edu` — PDF-extracted corpus (research papers, legal documents, government reports). 35 of 38 OpenEuroLLM target languages. 3 missing (ga/sq/lb) require HPLT.
+### Pre-tokenized dataset (fast path) — `birgermoell/oellm-longctx-tokenized-streamed-all-v2`
+
+Pre-tokenized Megatron bin/idx files already on HuggingFace, ready to download and use directly.
+Tokenized with the openeurollm tokenizer-256k (vocab 262,144 — same as training).
+
+| Property | Value |
+|----------|-------|
+| Languages | 8 (bg, cs, da, et, fi, fr, hr, nl) |
+| Format | Megatron `*_text_document.{bin,idx}` — 312 file pairs |
+| Estimated size | ~114 GB total |
+| Estimated tokens | ~35 billion |
+| Estimated docs | ~3 million |
+| Tiers | 16k_plus (≥16384), 4_16k (4096–16383), under4k (<4096) |
+| Structure | Per language × per shard × per chunk → merge with `merge_datasets.py` |
+
+`download_tokenized.sbatch` downloads all files, merges per language per tier (24 merged files),
+and writes `data_path.args` with uniform per-language weighting:
+
+```
+# 8 languages × 3 tiers — each language gets equal weight within its tier
+# 16k_plus weight 0.5/8=0.0625 per lang, 4_16k 0.3/8=0.0375, under4k 0.2/8=0.025
+0.0625 /flash/.../merged/bg_16k_plus_text_document
+0.0375 /flash/.../merged/bg_4_16k_text_document
+...
+```
+
+After download, update `yarn_multilingual.sbatch` to read the generated `data_path.args`:
+```bash
+DATA_PATH="$(cat /flash/project_462000963/bmoell/data_tokenized_hf_multilingual/data_path.args)"
+```
+
+### Raw source data — `HuggingFaceFW/finepdfs-edu`
+
+**Source:** PDF-extracted corpus (research papers, legal documents, government reports). 35 of 38 OpenEuroLLM target languages. 3 missing (ga/sq/lb) require HPLT.
 
 **Scale (1 sample shard per language):**
 
@@ -114,11 +152,14 @@ For LongRoPE, replace `"type": "yarn"` with `"type": "longrope"` and add the `lo
 
 ## The Plan Forward
 
-### Phase 1 — Smoke test and first multilingual run (this week)
+### Phase 1 — First full multilingual run (immediate)
 
-1. **yarn_multilingual_test (18494663)** currently running on dev-g — 10 iterations on the 16k_plus
-   multilingual tier. Confirms YaRN args, checkpoint loading, and training loss.
-2. **If smoke test passes → submit `yarn_multilingual.sbatch`** — 32 nodes, 256 GPUs, ~1000 iterations (~24h).
+1. ✅ ~~**YaRN multilingual smoke test**~~ — passed (job 18494787), loss 13.28 → 11.65 on 35-language data.
+2. **Submit `download_tokenized.sbatch`** — downloads 8-language pre-tokenized data (~114 GB, ~35B tokens)
+   from `birgermoell/oellm-longctx-tokenized-streamed-all-v2`. Skips tokenization for bg/cs/da/et/fi/fr/hr/nl.
+   Output: merged per-lang-per-tier files + `data_path.args` with uniform language weighting.
+3. **Update `yarn_multilingual.sbatch`** to read the generated `data_path.args`.
+4. **Submit `yarn_multilingual.sbatch`** — 32 nodes, 256 GPUs, ~1000 iterations (~24h).
 
 ### Phase 2 — Language-balanced full training (after smoke test)
 
@@ -151,9 +192,10 @@ The full multilingual run (`yarn_multilingual.sbatch`) should use one of these a
 
 | Script | Purpose | Nodes | Time |
 |--------|---------|-------|------|
+| `download_tokenized.sbatch` | Download 8-lang pre-tokenized data from HF, merge, write data_path.args | 1 | 4h |
 | `tokenize_tiers_mini.sbatch` | Mini tokenization: 50 docs/lang → 3 Megatron tier datasets | 1 | 10min |
 | `tokenize_tiers.sbatch` | Full tokenization: all 35 JSONL → 3 Megatron tier datasets | 1 | 8h |
-| `yarn_multilingual_test.sbatch` | YaRN 9B smoke test (10 iters, 16k_plus tier only) | 1 | 1h |
+| `yarn_multilingual_test.sbatch` | YaRN 9B smoke test ✅ (10 iters, 4 nodes CP=4) | 4 | 1h |
 | `yarn_multilingual.sbatch` | YaRN 9B multilingual full run (~1000 iters) | 32 | 24h |
 | `longrope_test.sbatch` | LongRoPE 9B smoke test (10 iters) | 1 | 30min |
 | `longrope_multilingual.sbatch` | LongRoPE 9B multilingual full run | 32 | 48h |
