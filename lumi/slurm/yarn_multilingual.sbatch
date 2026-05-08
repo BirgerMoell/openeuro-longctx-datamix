@@ -22,7 +22,8 @@
 # a single scaling factor (no language-specific search needed).
 #
 # Prerequisites:
-#   1. tokenize_tiers.sbatch must have completed (produces multilingual bin/idx)
+#   1. download_tokenized.sbatch must have completed — produces per-lang-per-tier merged
+#      files + data_path.args in /flash/.../data_tokenized_hf_multilingual/
 #   2. Jouni's checkpoint at LOAD_CKPT_PATH must be accessible
 #
 # Parallelism: TP=2, PP=4, CP=4  →  32 nodes × 8 GPUs = 256 GPUs total
@@ -101,12 +102,17 @@ mkdir -p "$CHECKPOINT_PATH" "$TENSORBOARD_DIR" "$DATA_CACHE_PATH"
 
 export HF_HOME="$WORKDIR/hf"
 
-# ── Data — our multilingual three-tier tokenized mix ─────────────────────────
-MULTILINGUAL_DIR=/flash/project_462000963/bmoell/data_tokenized_multilingual
-TOKENIZER_MODEL=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
-DATA_PATH="0.5 ${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document \
-0.3 ${MULTILINGUAL_DIR}/multilingual_4_16k_text_document \
-0.2 ${MULTILINGUAL_DIR}/multilingual_under4k_text_document"
+# ── Data — 8-language pre-tokenized HF dataset (download_tokenized.sbatch) ────
+# Per-language-per-tier merged files: bg cs da et fi fr hr nl × 16k_plus 4_16k under4k
+# Uniform per-language weighting: 16k_plus=0.0625/lang, 4_16k=0.0375/lang, under4k=0.025/lang
+HF_DATA_DIR=${HF_DATA_DIR:-/flash/project_462000963/bmoell/data_tokenized_hf_multilingual}
+TOKENIZER_MODEL=${TOKENIZER_MODEL:-/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20}
+if [ -z "${DATA_PATH:-}" ] && [ -f "${HF_DATA_DIR}/data_path.args" ]; then
+    DATA_PATH="$(cat "${HF_DATA_DIR}/data_path.args")"
+elif [ -z "${DATA_PATH:-}" ]; then
+    echo "ERROR: ${HF_DATA_DIR}/data_path.args not found. Run download_tokenized.sbatch first." >&2
+    exit 1
+fi
 
 # ── Model (9B: 32 layers, hidden 4096, 32 heads) ──────────────────────────────
 NUM_LAYERS=32
