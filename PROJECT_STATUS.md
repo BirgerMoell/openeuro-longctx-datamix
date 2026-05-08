@@ -1,6 +1,6 @@
 # OpenEuroLLM Long-Context Data Pipeline — Project Status
 
-**Last updated:** 2026-05-08  
+**Last updated:** 2026-05-08 (evening)  
 **Author:** Birger Moëll (AI Sweden) in collaboration with Jouni Luoma (TurkuNLP)  
 **Compute:** LUMI supercomputer (CSC), AMD Instinct MI300X, `standard-g` partition
 
@@ -29,6 +29,8 @@ The pipeline has two main components:
 | 3 ROCm/MI250X bugs found and fixed in Megatron | See `lumi/LUMI_STATUS.md` — vocab size, NCCL gloo, FusedLayerNorm apex hang |
 | Mini multilingual tokenization (3 tiers, 35 languages) | `tokenize_tiers_mini.sbatch` produces valid Megatron bin/idx files using lumi-multitorch SIF |
 | YaRN multilingual smoke test (job 18494787) | 10 iterations, 4 nodes × 8 GPUs, CP=4, 32K seqlen — loss 13.28 → 11.65, checkpoint saved |
+| Download + merge HF pre-tokenized data (job 18504569) | 8 languages × 3 tiers, 87 GB, 24 merged files, data_path.args + length_stats.json written |
+| HF multilingual data smoke test (job 18515088) | Full 24-entry blended DATA_PATH, 10 iters, loss 13.29 → 11.65 — no BlendedMegatronDataset hang at scale |
 
 ### 📋 Ready to Submit (fast path via pre-tokenized HF dataset)
 
@@ -155,11 +157,10 @@ For LongRoPE, replace `"type": "yarn"` with `"type": "longrope"` and add the `lo
 ### Phase 1 — First full multilingual run (immediate)
 
 1. ✅ ~~**YaRN multilingual smoke test**~~ — passed (job 18494787), loss 13.28 → 11.65 on 35-language data.
-2. **Submit `download_tokenized.sbatch`** — downloads 8-language pre-tokenized data (~114 GB, ~35B tokens)
-   from `birgermoell/oellm-longctx-tokenized-streamed-all-v2`. Skips tokenization for bg/cs/da/et/fi/fr/hr/nl.
-   Output: merged per-lang-per-tier files + `data_path.args` with uniform language weighting.
-3. **Update `yarn_multilingual.sbatch`** to read the generated `data_path.args`.
-4. **Submit `yarn_multilingual.sbatch`** — 32 nodes, 256 GPUs, ~1000 iterations (~24h).
+2. ✅ ~~**Submit `download_tokenized.sbatch`**~~ — completed (job 18504569), 87 GB, 24 merged files, `data_path.args` written.
+3. ✅ ~~**Update `yarn_multilingual.sbatch`**~~ — now reads from `HF_DATA_DIR/data_path.args` (pushed to GitHub).
+4. ✅ ~~**HF multilingual data smoke test**~~ — passed (job 18515088), full 24-entry blended DATA_PATH, loss 13.29 → 11.65, no hangs.
+5. **Submit `yarn_multilingual.sbatch`** — 32 nodes, 256 GPUs, ~1000 iterations (~24h).
 
 ### Phase 2 — Language-balanced full training (after smoke test)
 
