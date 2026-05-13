@@ -22,7 +22,10 @@
 #      Gives boundary positions (depth=0% at 32K) more gradient signal.
 #   3. 16k_plus tier upweighted to 75% of training tokens (was 50%).
 #      More exposure to documents that actually fill the 32K window.
-#   4. New output dir — does NOT overwrite v1 checkpoint.
+#   4. 31 languages (up from 8): dataset v2 includes bg bs ca cs da de el en
+#      es et eu fi fr gl hr hu is it lt lv mk mt nl no pl pt ro ru sk sl sv.
+#      Languages are discovered automatically from the merged directory.
+#   5. New output dir — does NOT overwrite v1 checkpoint.
 #
 # Data: birgermoell/oellm-longctx-tokenized-streamed-all-v2
 #   Already downloaded by download_tokenized.sbatch to HF_DATA_DIR.
@@ -112,7 +115,7 @@ TOKENIZER_MODEL=${TOKENIZER_MODEL:-/flash/project_462000963/jouni/checkpoints/co
 echo "=== Recomputing data_path.args with v2 tier weights ==="
 singularity exec -B "$BIND_DIRS" "$CONTAINER" python3 -u - \
     "$HF_DATA_DIR/merged" "$HF_DATA_DIR/data_path_v2.args" << 'PYEOF'
-import sys, pathlib
+import sys, re, pathlib
 
 merged_dir = pathlib.Path(sys.argv[1])
 out_file   = pathlib.Path(sys.argv[2])
@@ -122,7 +125,18 @@ out_file   = pathlib.Path(sys.argv[2])
 # 4_16k  (4K–16K tokens): 15% — was 30% in v1.
 # under4k      (<4K tokens): 10% — was 20% in v1.
 tier_weights = {"16k_plus": 0.75, "4_16k": 0.15, "under4k": 0.10}
-langs = ["bg", "cs", "da", "et", "fi", "fr", "hr", "nl"]
+
+# Discover languages from the bin files present in merged_dir.
+_pat = re.compile(r'^([a-z]+)_(16k_plus|4_16k|under4k)_text_document\.bin$')
+langs = sorted(set(
+    m.group(1)
+    for p in merged_dir.glob('*.bin')
+    for m in [_pat.match(p.name)] if m
+))
+if not langs:
+    print("ERROR: no language bin files found in merged dir — check path")
+    sys.exit(1)
+print(f"Discovered {len(langs)} languages: {langs}")
 
 entries = []
 for lang in langs:
