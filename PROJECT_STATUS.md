@@ -162,7 +162,7 @@ For LongRoPE, replace `"type": "yarn"` with `"type": "longrope"` and add the `lo
 3. ✅ ~~**Update `yarn_multilingual.sbatch`**~~ — now reads from `HF_DATA_DIR/data_path.args` (pushed to GitHub).
 4. ✅ ~~**HF multilingual data smoke test**~~ — passed (job 18515088), full 24-entry blended DATA_PATH, loss 13.29 → 11.65, no hangs.
 5. ✅ ~~**Submit `yarn_multilingual.sbatch`**~~ — completed (job 18536300), 1000 iters, loss 12.22 → 3.66, checkpoint at `/flash/project_462000963/bmoell/yarn-multilingual/checkpoints/iter_0001000`.
-6. **Convert checkpoint to HuggingFace format** and add `rope_scaling` to `config.json`.
+6. ✅ ~~**Convert checkpoint to HuggingFace format**~~ — completed (job 18602312). Model at `/flash/project_462000963/bmoell/yarn-multilingual/converted/checkpoint_0001000/` (17 GB). `rope_scaling` patched into `config.json`.
 7. **Evaluate on long-context benchmarks** — RULER, Needle-in-a-Haystack, LongBench.
 
 ### Phase 2 — Language-balanced full training (after smoke test)
