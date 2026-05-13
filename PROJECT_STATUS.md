@@ -1,6 +1,6 @@
 # OpenEuroLLM Long-Context Data Pipeline — Project Status
 
-**Last updated:** 2026-05-08 (evening)  
+**Last updated:** 2026-05-10  
 **Author:** Birger Moëll (AI Sweden) in collaboration with Jouni Luoma (TurkuNLP)  
 **Compute:** LUMI supercomputer (CSC), AMD Instinct MI300X, `standard-g` partition
 
@@ -31,6 +31,7 @@ The pipeline has two main components:
 | YaRN multilingual smoke test (job 18494787) | 10 iterations, 4 nodes × 8 GPUs, CP=4, 32K seqlen — loss 13.28 → 11.65, checkpoint saved |
 | Download + merge HF pre-tokenized data (job 18504569) | 8 languages × 3 tiers, 87 GB, 24 merged files, data_path.args + length_stats.json written |
 | HF multilingual data smoke test (job 18515088) | Full 24-entry blended DATA_PATH, 10 iters, loss 13.29 → 11.65 — no BlendedMegatronDataset hang at scale |
+| **Full multilingual YaRN training (job 18536300)** | **1000 iters, 32 nodes × 256 GPUs, 9h — loss 12.22 → 3.66, val PPL 35.4, checkpoint saved** |
 
 ### 📋 Ready to Submit (fast path via pre-tokenized HF dataset)
 
@@ -160,7 +161,9 @@ For LongRoPE, replace `"type": "yarn"` with `"type": "longrope"` and add the `lo
 2. ✅ ~~**Submit `download_tokenized.sbatch`**~~ — completed (job 18504569), 87 GB, 24 merged files, `data_path.args` written.
 3. ✅ ~~**Update `yarn_multilingual.sbatch`**~~ — now reads from `HF_DATA_DIR/data_path.args` (pushed to GitHub).
 4. ✅ ~~**HF multilingual data smoke test**~~ — passed (job 18515088), full 24-entry blended DATA_PATH, loss 13.29 → 11.65, no hangs.
-5. **Submit `yarn_multilingual.sbatch`** — 32 nodes, 256 GPUs, ~1000 iterations (~24h).
+5. ✅ ~~**Submit `yarn_multilingual.sbatch`**~~ — completed (job 18536300), 1000 iters, loss 12.22 → 3.66, checkpoint at `/flash/project_462000963/bmoell/yarn-multilingual/checkpoints/iter_0001000`.
+6. **Convert checkpoint to HuggingFace format** and add `rope_scaling` to `config.json`.
+7. **Evaluate on long-context benchmarks** — RULER, Needle-in-a-Haystack, LongBench.
 
 ### Phase 2 — Language-balanced full training (after smoke test)
 
