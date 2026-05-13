@@ -71,13 +71,15 @@ echo "$iteration" > "$tmp_dir/latest_checkpointed_iteration.txt"
 
 singularity exec "$CONTAINER" /bin/bash -c "
     pip install --quiet --user transformers==4.48.2
+    export PYTHONPATH=$PORO2_MEGATRON:\${PYTHONPATH:-}
     python3 $PORO2_MEGATRON/tools/checkpoint/convert.py \
         --model-type GPT \
         --loader mcore \
         --saver llama_mistral \
         --load-dir '$tmp_dir' \
         --save-dir '$OUTPUT_DIR' \
-        --tokenizer-dir '$TOKENIZER_DIR'
+        --tokenizer-dir '$TOKENIZER_DIR' \
+        --megatron-path '$PORO2_MEGATRON'
 "
 
 echo ""
