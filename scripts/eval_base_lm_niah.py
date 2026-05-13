@@ -170,17 +170,21 @@ def score_completion(model, tokenizer, prefix: str, candidate: str, device) -> f
     enc_full = tokenizer(full, return_tensors="pt", truncation=False).to(device)
     enc_pre = tokenizer(prefix, return_tensors="pt", truncation=False).to(device)
     pre_len = enc_pre["input_ids"].shape[1]
-
-    with torch.no_grad():
-        out = model(**enc_full)
-
-    logits = out.logits[0]  # [L, V]
-    lp = F.log_softmax(logits, dim=-1)
     ids = enc_full["input_ids"][0][pre_len:]
 
     if len(ids) == 0:
         return float("-inf")
-    return sum(lp[pre_len - 1 + j, ids[j]].item() for j in range(len(ids)))
+
+    with torch.no_grad():
+        out = model(**enc_full)
+
+    # Only pull the rows we need before log_softmax.
+    # Full logits [L, V] at 32K context + vocab 262144 ≈ 17 GB — OOM.
+    # Completion token j is predicted by logit at position pre_len-1+j.
+    positions = torch.arange(pre_len - 1, pre_len - 1 + len(ids), device=device)
+    logits_needed = out.logits[0][positions]          # [num_completion_tokens, V]
+    lp = F.log_softmax(logits_needed, dim=-1)         # safe: ~4 MB not 17 GB
+    return sum(lp[j, ids[j]].item() for j in range(len(ids)))
 
 
 # ── Single trial ───────────────────────────────────────────────────────────────
@@ -279,7 +283,7 @@ def main():
 
     print("Loading model (bfloat16)...", flush=True)
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.bfloat16, device_map="auto"
+        args.model, dtype=torch.bfloat16, device_map="auto"
     )
     model.eval()
     print("Model loaded.\n", flush=True)
@@ -293,9 +297,15 @@ def main():
             continue
         tmpl = LANG_TEMPLATES[lang]
         lang_results = []
+        lang_jsonl = open(out_dir / f"{lang}_results.jsonl", "w")
         print(f"\n{'═'*72}")
         print(f"Language: {lang.upper()}")
         print('═'*72, flush=True)
+
+        def append(r):
+            lang_results.append(r)
+            lang_jsonl.write(json.dumps(r, ensure_ascii=False) + "\n")
+            lang_jsonl.flush()
 
         # ── Main grid: context length × depth ─────────────────────────────
         for ctx_len in args.context_lengths:
@@ -306,7 +316,7 @@ def main():
                                   ctx_len, depth, t)
                     r["lang"] = lang
                     r["condition"] = "main"
-                    lang_results.append(r)
+                    append(r)
                     cell_correct += r["correct"]
                 acc = cell_correct / args.trials
                 print(f"  ctx={ctx_len:6d}  depth={depth:.2f}  "
@@ -323,7 +333,7 @@ def main():
                           no_context=True)
             r["lang"] = lang
             r["condition"] = "no_context"
-            lang_results.append(r)
+            append(r)
             nc_correct += r["correct"]
         print(f"  no_context    acc={nc_correct/args.trials:.2f}  "
               f"({nc_correct}/{args.trials})", flush=True)
@@ -335,7 +345,7 @@ def main():
                           shuffle_bindings=True)
             r["lang"] = lang
             r["condition"] = "shuffled"
-            lang_results.append(r)
+            append(r)
             sh_correct += r["correct"]
         print(f"  shuffled      acc={sh_correct/args.trials:.2f}  "
               f"({sh_correct}/{args.trials})", flush=True)
@@ -346,16 +356,13 @@ def main():
             r = run_trial(model, tokenizer, device, tmpl, 256, 0.5, t)
             r["lang"] = lang
             r["condition"] = "short_ctx"
-            lang_results.append(r)
+            append(r)
             sb_correct += r["correct"]
         print(f"  short_ctx     acc={sb_correct/args.trials:.2f}  "
               f"({sb_correct}/{args.trials})", flush=True)
 
+        lang_jsonl.close()
         all_results.extend(lang_results)
-        # Save per-language JSONL
-        with open(out_dir / f"{lang}_results.jsonl", "w") as f:
-            for r in lang_results:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     # ── Summary table ──────────────────────────────────────────────────────
     print(f"\n{'═'*72}")
