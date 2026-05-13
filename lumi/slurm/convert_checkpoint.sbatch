@@ -29,8 +29,11 @@
 
 set -euo pipefail
 
-CONTAINER=/appl/local/containers/sif-images/lumi-pytorch-rocm-6.2.4-python-3.12-pytorch-v2.6.0.sif
-export SINGULARITY_BIND=/pfs,/scratch,/projappl,/project,/flash,/appl,/usr/lib64/libjansson.so.4,/usr/lib64/libcxi.so.1,/opt/cray,/var/spool/slurmd
+# Must match the training container — TE extra_state is not cross-version portable.
+# The older rocm-6.2.4 container gives EOFError deserializing TE extra_state from
+# checkpoints saved by te-2.4.0. Use the same rocm-6.4.4 container as training.
+CONTAINER=/scratch/project_462000963/containers/staging/rocm-6.4.4-pytorch-2.9.1-te-2.4.0-fa-2.8.0.sif
+export SINGULARITY_BIND=/pfs,/scratch,/projappl,/project,/flash,/appl,/opt/cray,/var/spool/slurmd
 
 PORO2_MEGATRON=/scratch/project_462000963/users/jouni/CPT_from_finetuned/poro2-scripts-dev/Megatron-LM
 TOKENIZER_DIR=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
@@ -67,7 +70,7 @@ ln -s "$(readlink -f "$CKPT_ITER_DIR")" "$tmp_dir/$iter_segment"
 echo "$iteration" > "$tmp_dir/latest_checkpointed_iteration.txt"
 
 singularity exec "$CONTAINER" /bin/bash -c "
-    pip install --quiet transformers==4.48.2
+    pip install --quiet --user transformers==4.48.2
     python3 $PORO2_MEGATRON/tools/checkpoint/convert.py \
         --model-type GPT \
         --loader mcore \
