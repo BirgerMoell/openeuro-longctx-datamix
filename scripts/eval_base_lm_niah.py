@@ -33,9 +33,7 @@ Usage
 
 import argparse
 import json
-import math
 import random
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -146,7 +144,8 @@ def build_context(
     preamble_toks = len(tokenizer.encode(tmpl["preamble"]))
     query_toks = len(tokenizer.encode(query_needle + "\n"))
 
-    budget = max(0, target_tokens - preamble_toks - query_toks - 20)
+    # Leave ~50-token headroom for the prefix stub + candidate appended by the scorer
+    budget = max(0, target_tokens - preamble_toks - query_toks - 50)
     need_filler = budget // toks_per_line
 
     # Cycle filler pool to fill the budget
@@ -219,13 +218,15 @@ def run_trial(
 
     # Candidates: true answer + 3 distractors from context
     if shuffle_bindings:
-        # After shuffle, the value that appears for query_key in context has
-        # rotated to distractor_kvs[0][1]; the query_value is now elsewhere.
-        true_candidate = filler_kvs[0][1]  # first filler now holds original query_value
+        # After rotation in build_context, query_key maps to filler_kvs[0][1].
+        # Distractors must NOT include filler_kvs[0][1] to avoid duplicates.
+        true_candidate = filler_kvs[0][1]
+        distractors = [query_value] + [v for _, v in filler_kvs[1:3]]
     else:
         true_candidate = query_value
+        distractors = [v for _, v in distractor_kvs[:3]]
 
-    candidates = [true_candidate] + [v for _, v in distractor_kvs[:3]]
+    candidates = [true_candidate] + distractors
     random.shuffle(candidates)
     true_idx = candidates.index(true_candidate)
 
