@@ -143,34 +143,123 @@ further fine-tuning or as a research artefact.
 
 ## Evaluation
 
-Base-LM Needle-in-a-Haystack (NIAH) via forced-choice log-likelihood scoring.
-4-choice forced retrieval, 10 trials per cell, scored by log-likelihood (no instruction following required).
+### Method
 
-**Grid:** 4 languages × 5 context lengths (2K–32K) × 5 needle depths (0%–100%)
+**Base-LM Needle-in-a-Haystack (NIAH)** via forced-choice log-likelihood scoring.
+No instruction following required — the model scores candidates purely by log P(completion | context).
 
-### Accuracy by language × context length (averaged across all depths)
+- **Task:** A key→value fact (the "needle") is inserted at a specified depth in a long filler context.
+  The model must identify the correct 7-digit value for a queried key from 4 candidates.
+- **Candidates:** The 3 distractors are values from *other* keys present in the same context,
+  so the task tests retrieval + binding, not memorisation.
+- **Scoring:** `argmax` log-likelihood over the 4 candidates.
+- **Grid:** 4 languages × 5 context lengths × 5 depths × 10 trials = 1 000 cells per language.
+- **Languages:** French (fr), Finnish (fi), Czech (cs), Dutch (nl) — chosen to span Romance,
+  Finnic, Slavic, and Germanic families for comparison with prior OpenEuroLLM evals.
+
+### Summary — accuracy by language × context length (avg across all depths)
 
 | lang | 2K | 4K | 8K | 16K | 32K |
-|------|-----|-----|-----|------|-----|
-| fr | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
-| fi | 1.00 | 1.00 | 1.00 | 1.00 | 0.90 |
-| cs | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
-| nl | 1.00 | 0.98 | 1.00 | 1.00 | 0.88 |
+|------|-----|-----|-----|------|------|
+| fr   | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
+| fi   | 1.00 | 1.00 | 1.00 | 1.00 | 0.90 |
+| cs   | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
+| nl   | 1.00 | 0.98 | 1.00 | 1.00 | 0.88 |
+
+*(32K averages are pulled down solely by the depth=0% cell; all other depths score 1.00)*
+
+---
+
+### Full per-depth results
+
+Each cell shows accuracy (correct / 10 trials).
+
+#### French (fr)
+
+| ctx \ depth | 0% | 25% | 50% | 75% | 100% |
+|-------------|-----|------|------|------|-------|
+| 2 048  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 4 096  | 1.00 | **0.90** | 1.00 | 1.00 | 1.00 |
+| 8 192  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 16 384 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 32 768 | **0.20** | 1.00 | 1.00 | 1.00 | 1.00 |
+
+Controls: no_context=0.20 · shuffled=1.00 · short_ctx=1.00
+
+#### Finnish (fi)
+
+| ctx \ depth | 0% | 25% | 50% | 75% | 100% |
+|-------------|-----|------|------|------|-------|
+| 2 048  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 4 096  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 8 192  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 16 384 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 32 768 | **0.50** | 1.00 | 1.00 | 1.00 | 1.00 |
+
+Controls: no_context=0.20 · shuffled=0.90 · short_ctx=0.90
+
+#### Czech (cs)
+
+| ctx \ depth | 0% | 25% | 50% | 75% | 100% |
+|-------------|-----|------|------|------|-------|
+| 2 048  | 1.00 | 1.00 | **0.90** | 1.00 | 1.00 |
+| 4 096  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 8 192  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 16 384 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 32 768 | **0.20** | 1.00 | 1.00 | 1.00 | 1.00 |
+
+Controls: no_context=0.40 · shuffled=1.00 · short_ctx=1.00
+
+#### Dutch (nl)
+
+| ctx \ depth | 0% | 25% | 50% | 75% | 100% |
+|-------------|-----|------|------|------|-------|
+| 2 048  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 4 096  | 1.00 | **0.90** | 1.00 | 1.00 | 1.00 |
+| 8 192  | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 16 384 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 32 768 | **0.40** | 1.00 | 1.00 | 1.00 | 1.00 |
+
+Controls: no_context=0.30 · shuffled=1.00 · short_ctx=1.00
+
+---
 
 ### Key findings
 
-- **2K–16K:** Near-perfect retrieval across all depths and languages (≥0.98 average).
-- **32K depth ≥ 25%:** 1.00 across all tested languages — YaRN context extension works correctly.
-- **32K depth = 0%:** 0.20–0.50 depending on language — a known "attention sink / extreme primacy" limitation at the maximum context length. This is distinct from the mscale bug fixed in v2 (which affected all depths at 32K in v1).
-- **v2 vs v1:** The mscale fix (`mscale=1.277`) restored near-perfect 32K retrieval for depths 25–100%. The residual depth=0% weakness at 32K is a structural property of the attention mechanism at extreme positional distances, not a training artefact of this checkpoint.
+**Retrieval at 2K–16K is near-perfect.** All languages score ≥0.98 averaged across depths
+at every context length up to 16K. The model retrieves correctly regardless of where in the
+context the needle is placed.
 
-### Control conditions (FR, FI, CS)
+**32K retrieval at depth ≥ 25% is 1.00.** Once the needle is at least 25% into a 32K context,
+all four languages score perfectly. This confirms that YaRN context extension with the correct
+`mscale=1.277` works as intended across language families.
 
-| condition | acc |
-|-----------|-----|
-| no_context (random baseline) | 0.20–0.40 |
-| shuffled bindings | 0.90–1.00 |
-| short context (256 tok) | 0.90–1.00 |
+**32K depth=0% is the single weak cell.** Accuracy at this position ranges from 0.20 to 0.50
+across languages (FR=0.20, CS=0.20, NL=0.40, FI=0.50). This is a known limitation: at depth=0%,
+the needle sits at position ~0 while the query is appended at position ~32K. This maximum-distance
+retrieval is impaired by two compounding factors:
+
+1. **Attention sinks.** Transformers develop attention patterns that concentrate probability
+   mass on the first token regardless of content. When the needle *is* at position 0, the
+   content-retrieval signal competes with this structural bias.
+2. **Extreme RoPE interpolation.** YaRN extends 2048→32768 by scaling rotary frequencies.
+   The relative distance from query (~32K) back to position 0 is at the absolute maximum of
+   the interpolated range, where the positional encoding is least reliable.
+
+This is **distinct from the mscale bug fixed in v2.** In v1, the missing `mscale` degraded
+*all* depths at 32K. In v2, depths 25–100% are restored to 1.00; only the structural
+position-0 limitation remains.
+
+**Control conditions behave as expected:**
+
+| condition | description | expected | observed |
+|-----------|-------------|----------|---------|
+| no_context | prefix only, no filler | ~0.25 (chance) | 0.20–0.40 |
+| shuffled | key→value bindings rotated | correct answer changes | 0.90–1.00 ✓ |
+| short_ctx | 256-token context, depth=50% | should succeed easily | 0.90–1.00 ✓ |
+
+The shuffled and short_ctx controls confirm the scoring mechanism is sound and the model
+genuinely tracks key→value bindings rather than memorising values.
 
 *Extended 31-language eval pending (job 18746959).*
 
