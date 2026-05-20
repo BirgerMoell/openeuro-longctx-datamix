@@ -48,11 +48,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 #   preamble — short header before the needle list
 
 LANG_TEMPLATES = {
-    "en": dict(
-        needle='The special magic number for "{key}" is: {value}.',
-        prefix='The special magic number for "{key}" is:',
-        preamble="Below is a collection of facts.\n\n",
-    ),
+    # ── 4 original comparison languages (match v1 eval) ───────────────────────
     "fr": dict(
         needle='Le nombre magique spécial pour « {key} » est : {value}.',
         prefix='Le nombre magique spécial pour « {key} » est :',
@@ -63,30 +59,172 @@ LANG_TEMPLATES = {
         prefix='Sanan "{key}" erityinen taikuusnumero on:',
         preamble="Alla on joukko faktoja.\n\n",
     ),
+    "cs": dict(
+        needle='Speciální magické číslo pro „{key}" je: {value}.',
+        prefix='Speciální magické číslo pro „{key}" je:',
+        preamble="Níže je sbírka faktů.\n\n",
+    ),
     "nl": dict(
         needle='Het speciale magische getal voor "{key}" is: {value}.',
         prefix='Het speciale magische getal voor "{key}" is:',
         preamble="Hieronder staat een verzameling feiten.\n\n",
     ),
-    "cs": dict(
-        needle='Speciální magické číslo pro „{key}" je: {value}.',
-        prefix='Speciální magické číslo pro „{key}" je:',
-        preamble="Níže je sbírka faktů.\n\n",
+    # ── Additional EU official languages ──────────────────────────────────────
+    "en": dict(
+        needle='The special magic number for "{key}" is: {value}.',
+        prefix='The special magic number for "{key}" is:',
+        preamble="Below is a collection of facts.\n\n",
+    ),
+    "bg": dict(
+        needle='Специалното магическо число за „{key}" е: {value}.',
+        prefix='Специалното магическо число за „{key}" е:',
+        preamble="По-долу е колекция от факти.\n\n",
     ),
     "da": dict(
         needle='Det specielle magiske tal for "{key}" er: {value}.',
         prefix='Det specielle magiske tal for "{key}" er:',
         preamble="Nedenfor er en samling fakta.\n\n",
     ),
+    "de": dict(
+        needle='Die spezielle magische Zahl für „{key}" lautet: {value}.',
+        prefix='Die spezielle magische Zahl für „{key}" lautet:',
+        preamble="Nachfolgend finden Sie eine Sammlung von Fakten.\n\n",
+    ),
+    "el": dict(
+        needle='Ο ειδικός μαγικός αριθμός για το "{key}" είναι: {value}.',
+        prefix='Ο ειδικός μαγικός αριθμός για το "{key}" είναι:',
+        preamble="Παρακάτω είναι μια συλλογή γεγονότων.\n\n",
+    ),
+    "es": dict(
+        needle='El número mágico especial para "{key}" es: {value}.',
+        prefix='El número mágico especial para "{key}" es:',
+        preamble="A continuación se muestra una colección de hechos.\n\n",
+    ),
     "et": dict(
         needle='Sõna "{key}" eriline võlunumber on: {value}.',
         prefix='Sõna "{key}" eriline võlunumber on:',
         preamble="Allpool on kogum fakte.\n\n",
     ),
+    "ga": dict(
+        needle='Is é an uimhir draíochta speisialta do "{key}": {value}.',
+        prefix='Is é an uimhir draíochta speisialta do "{key}":',
+        preamble="Seo thíos bailiúchán fíricí.\n\n",
+    ),
     "hr": dict(
         needle='Poseban čarobni broj za "{key}" je: {value}.',
         prefix='Poseban čarobni broj za "{key}" je:',
         preamble="Ispod je zbirka činjenica.\n\n",
+    ),
+    "hu": dict(
+        needle='A(z) „{key}" különleges varázslatos száma: {value}.',
+        prefix='A(z) „{key}" különleges varázslatos száma:',
+        preamble="Az alábbiakban tények gyűjteménye található.\n\n",
+    ),
+    "it": dict(
+        needle='Il numero magico speciale per "{key}" è: {value}.',
+        prefix='Il numero magico speciale per "{key}" è:',
+        preamble="Di seguito è riportata una raccolta di fatti.\n\n",
+    ),
+    "lt": dict(
+        needle='Specialus maginis skaičius „{key}" yra: {value}.',
+        prefix='Specialus maginis skaičius „{key}" yra:',
+        preamble="Žemiau pateikiama faktų rinkinys.\n\n",
+    ),
+    "lv": dict(
+        needle='Īpašais burvju skaitlis priekš „{key}" ir: {value}.',
+        prefix='Īpašais burvju skaitlis priekš „{key}" ir:',
+        preamble="Zemāk ir faktu kolekcija.\n\n",
+    ),
+    "mt": dict(
+        needle='In-numru maġiku speċjali għal "{key}" huwa: {value}.',
+        prefix='In-numru maġiku speċjali għal "{key}" huwa:',
+        preamble="Hawn taħt hemm kollezzjoni ta' fatti.\n\n",
+    ),
+    "pl": dict(
+        needle='Specjalna magiczna liczba dla „{key}" wynosi: {value}.',
+        prefix='Specjalna magiczna liczba dla „{key}" wynosi:',
+        preamble="Poniżej znajduje się zbiór faktów.\n\n",
+    ),
+    "pt": dict(
+        needle='O número mágico especial para "{key}" é: {value}.',
+        prefix='O número mágico especial para "{key}" é:',
+        preamble="Abaixo está uma coleção de fatos.\n\n",
+    ),
+    "ro": dict(
+        needle='Numărul magic special pentru „{key}" este: {value}.',
+        prefix='Numărul magic special pentru „{key}" este:',
+        preamble="Mai jos este o colecție de fapte.\n\n",
+    ),
+    "sk": dict(
+        needle='Špeciálne magické číslo pre „{key}" je: {value}.',
+        prefix='Špeciálne magické číslo pre „{key}" je:',
+        preamble="Nižšie je zbierka faktov.\n\n",
+    ),
+    "sl": dict(
+        needle='Posebno čarobno število za „{key}" je: {value}.',
+        prefix='Posebno čarobno število za „{key}" je:',
+        preamble="Spodaj je zbirka dejstev.\n\n",
+    ),
+    "sv": dict(
+        needle='Det speciella magiska numret för "{key}" är: {value}.',
+        prefix='Det speciella magiska numret för "{key}" är:',
+        preamble="Nedan är en samling fakta.\n\n",
+    ),
+    # ── Additional European languages ─────────────────────────────────────────
+    "ca": dict(
+        needle='El número màgic especial per a "{key}" és: {value}.',
+        prefix='El número màgic especial per a "{key}" és:',
+        preamble="A continuació hi ha una col·lecció de fets.\n\n",
+    ),
+    "eu": dict(
+        needle='"{key}" hitzarentzako zenbaki magiko berezia: {value}.',
+        prefix='"{key}" hitzarentzako zenbaki magiko berezia:',
+        preamble="Hona hemen gertakarien bilduma bat.\n\n",
+    ),
+    "gl": dict(
+        needle='O número máxico especial para "{key}" é: {value}.',
+        prefix='O número máxico especial para "{key}" é:',
+        preamble="A continuación hai unha colección de feitos.\n\n",
+    ),
+    "is": dict(
+        needle='Sérstaka töfratalan fyrir „{key}" er: {value}.',
+        prefix='Sérstaka töfratalan fyrir „{key}" er:',
+        preamble="Hér að neðan er safn staðreynda.\n\n",
+    ),
+    "lb": dict(
+        needle='Déi speziell Zauberzuel fir „{key}" ass: {value}.',
+        prefix='Déi speziell Zauberzuel fir „{key}" ass:',
+        preamble="Hei drënner ass eng Sammlung vu Fakten.\n\n",
+    ),
+    "mk": dict(
+        needle='Специјалниот магичен број за „{key}" е: {value}.',
+        prefix='Специјалниот магичен број за „{key}" е:',
+        preamble="Подолу е збирка факти.\n\n",
+    ),
+    "no": dict(
+        needle='Det spesielle magiske tallet for "{key}" er: {value}.',
+        prefix='Det spesielle magiske tallet for "{key}" er:',
+        preamble="Nedenfor er en samling fakta.\n\n",
+    ),
+    "oc": dict(
+        needle='Lo nombre magic especial per "{key}" es: {value}.',
+        prefix='Lo nombre magic especial per "{key}" es:',
+        preamble="Çai jos es una collecion de faits.\n\n",
+    ),
+    "sq": dict(
+        needle='Numri i veçantë magjik për "{key}" është: {value}.',
+        prefix='Numri i veçantë magjik për "{key}" është:',
+        preamble="Më poshtë është një koleksion faktesh.\n\n",
+    ),
+    "sr": dict(
+        needle='Специјални магични број за „{key}" је: {value}.',
+        prefix='Специјални магични број за „{key}" је:',
+        preamble="У наставку је збирка чињеница.\n\n",
+    ),
+    "uk": dict(
+        needle='Спеціальне чарівне число для «{key}» — {value}.',
+        prefix='Спеціальне чарівне число для «{key}» —',
+        preamble="Нижче наведено колекцію фактів.\n\n",
     ),
 }
 
