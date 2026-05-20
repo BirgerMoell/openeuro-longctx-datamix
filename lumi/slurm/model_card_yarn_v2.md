@@ -154,8 +154,8 @@ Base-LM Needle-in-a-Haystack (NIAH) via forced-choice log-likelihood scoring.
 |------|-----|-----|-----|------|-----|
 | fr | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
 | fi | 1.00 | 1.00 | 1.00 | 1.00 | 0.90 |
-| cs | 1.00 | 1.00 | 1.00 | 1.00 | 0.84 |
-| nl | *(in progress)* | | | | |
+| cs | 1.00 | 0.98 | 1.00 | 1.00 | 0.84 |
+| nl | 1.00 | 0.98 | 1.00 | 1.00 | 0.88 |
 
 ### Key findings
 
@@ -172,7 +172,7 @@ Base-LM Needle-in-a-Haystack (NIAH) via forced-choice log-likelihood scoring.
 | shuffled bindings | 0.90–1.00 |
 | short context (256 tok) | 0.90–1.00 |
 
-*NL full results pending (job 18749776). Extended 31-language eval pending (job 18746959).*
+*Extended 31-language eval pending (job 18746959).*
 
 ## Training framework
 
