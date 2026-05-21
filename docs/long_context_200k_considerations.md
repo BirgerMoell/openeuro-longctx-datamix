@@ -187,14 +187,98 @@ further.
 
 ---
 
+## 9. Training on Leonardo and MareNostrum
+
+Access to Leonardo (CINECA) and MareNostrum 5 (BSC) substantially changes what is
+feasible compared to LUMI.
+
+### Hardware comparison
+
+| Cluster | Accelerator | Memory/GPU | GPU interconnect | Total GPUs |
+|---|---|---|---|---|
+| LUMI-G | AMD MI250X (2 GCDs) | 128 GB HBM2e per card | InfiniBand HDR | ~10,000 GCDs |
+| Leonardo Booster | NVIDIA A100 SXM | 80 GB HBM2e | NVLink 3.0 + InfiniBand HDR200 | ~13,800 |
+| MareNostrum 5 ACC | NVIDIA H100 SXM | 80 GB HBM3 | NVLink 4.0 + InfiniBand NDR | ~4,480 |
+
+**Key advantages for long-context training:**
+
+- **NVLink** between GPUs within a node makes context parallelism (CP) dramatically more
+  efficient than on LUMI, where inter-GCD bandwidth is the bottleneck. On Leonardo a
+  4-GPU node communicates at ~600 GB/s NVLink vs ~200 GB/s on LUMI between GCDs.
+- **A100/H100 CUDA ecosystem**: FlashAttention 3, TransformerEngine, and Megatron-LM's
+  context parallelism are all better tested and optimized on NVIDIA hardware than on ROCm.
+  Ring attention implementations are also more mature on CUDA.
+- **80 GB per GPU**: a 9B model in bf16 uses ~18 GB for weights. With 80 GB available,
+  a single A100 can hold the model + a 200K KV cache slice (with CP=4, each GPU handles
+  50K tokens → KV cache per GPU ~26 GB) + activations, making the memory arithmetic work
+  without aggressive quantization.
+
+### Recommended parallelism configuration for 9B at 200K
+
+On Leonardo with 4× A100 80GB per node:
+
+```
+Tensor Parallelism (TP)  = 4   # within node, over NVLink
+Pipeline Parallelism (PP) = 2  # across nodes
+Context Parallelism (CP)  = 4  # within node, over NVLink
+Data Parallelism (DP)     = N  # scale with number of nodes
+```
+
+A single training node (4 GPUs) would handle one full 200K sequence with this config.
+With 32 nodes (128 A100s): DP=16 → global batch of 16 sequences × 200K tokens = 3.2M
+tokens per step. At 500K tokens/s throughput (estimated), that is ~6 seconds per step —
+manageable for a continued pre-training run of a few hundred steps.
+
+For MareNostrum 5 with H100s the same config applies; H100's higher memory bandwidth
+(~3.35 TB/s vs ~2 TB/s on A100) and larger L2 cache make FlashAttention faster, so
+throughput per GPU would be roughly 1.5–2× higher.
+
+### Practical training plan for 200K on Leonardo/MareNostrum
+
+**Starting point:** the existing v2 checkpoint at 32K (iter 1000, saved at
+`/flash/project_462000963/bmoell/yarn-multilingual-v2-1k/checkpoints` on LUMI).
+
+**Stage 4 — extend to 128K** (~200M tokens, ~2–4h on 32 nodes of Leonardo)
+- Switch RoPE to non-uniform scaling (LongRoPE), factor ~64
+- Mix: 80% short sequences (≤32K), 20% long sequences (32K–128K) — preserves short
+  context performance while teaching new positions
+- Use CP=4, TP=4, PP=2 on Leonardo nodes
+
+**Stage 5 — extend to 200K** (~100M tokens, ~1–2h on 32 nodes of Leonardo)
+- RoPE factor ~100, mscale ~1.46
+- Mix: 50% short, 50% long (up to 200K)
+- Same parallelism config
+
+**Stage 6 — long-context SFT** (~50M tokens of task-specific data)
+- Multi-document QA, repo-level code, long-form summarization in all 38 languages
+- This is where multilingual long-context capability is explicitly trained
+
+**Total estimated GPU-hours for stages 4–6:** ~500–1000 A100-hours, depending on
+convergence speed. Comparable in cost to the original 32K extension run on LUMI.
+
+### What to prepare before a Leonardo/MareNostrum run
+
+1. **Convert checkpoint to safetensors** and validate it loads cleanly under Megatron-LM
+   on CUDA (the LUMI checkpoint was saved in Megatron torch format for ROCm).
+2. **Curate long-document training data**: at minimum 10B tokens of documents >32K tokens,
+   with multilingual coverage. Prioritize languages that already have strong NIAH scores
+   (en, ga, lt, sv) as anchors, and include all 38 OELLM languages proportionally.
+3. **Implement non-uniform RoPE** (LongRoPE): the current codebase uses YaRN uniform
+   scaling; this needs a code change in the RoPE implementation before stage 4 starts.
+4. **Set up evaluation infrastructure** on the target cluster so each stage can be
+   validated with a quick NIAH run before proceeding to the next.
+
+---
+
 ## Summary: What Would Need to Change
 
-| Component | 32K (current) | 200K (target) |
+| Component | 32K / LUMI (current) | 200K / Leonardo or MareNostrum |
 |---|---|---|
 | RoPE scaling | YaRN uniform, factor=16 | Non-uniform (LongRoPE), factor~100 |
-| Attention | Single-GPU FlashAttention | Context parallelism across 4–8 GPUs |
-| KV cache | ~6 GB at 32K | ~105 GB at 200K → requires quantization or CP |
+| Attention | Single-GPU FlashAttention | Context parallelism, CP=4 within node |
+| KV cache | ~6 GB at 32K | ~26 GB per GPU with CP=4 (fits on A100 80GB) |
 | Training data | Standard pre-training mix | Long-document curation + synthetic tasks |
 | Training recipe | Single extension stage | Staged (32K→128K→200K) |
 | Eval | 5-depth NIAH, 25 cells | Multi-hop, aggregation, 200-distractor NIAH |
-| Infrastructure | 1 GPU (eval), 32-node (train) | 32-node with CP=4+ mandatory |
+| Infrastructure | 32-node LUMI-G (MI250X) | 32-node Leonardo/MN5 (A100/H100) |
+| Estimated GPU-hours | ~300 A100-eq hours (32K ext) | ~500–1000 A100-hours (stages 4–6) |
