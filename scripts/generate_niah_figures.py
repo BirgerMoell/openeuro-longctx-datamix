@@ -43,6 +43,7 @@ COMPARISON = {
 EXTENDED = {
     "en": make_grid(d0=0.80),
     "bg": make_grid(d0=0.20),
+    "ca": make_grid(d0=0.40),
     "da": make_grid(d0=0.20, c4k=[1.00, 0.80, 1.00, 1.00, 1.00]),
     "de": make_grid(d0=0.20),
     "el": make_grid(d0=0.20),
@@ -54,15 +55,24 @@ EXTENDED = {
     "it": make_grid(d0=0.40, c2k=[1.00, 1.00, 0.80, 1.00, 1.00]),
     "lt": make_grid(d0=1.00),
     "lv": make_grid(d0=0.00),
+    "mt": make_grid(d0=0.00),
+    "pl": make_grid(d0=0.20),
+    "pt": make_grid(d0=0.40),
+    "ro": make_grid(d0=0.20),
+    "sk": make_grid(d0=0.00),
+    "sl": make_grid(d0=0.20),
+    "sv": make_grid(d0=0.60),
 }
 
 LANG_LABELS = {
     "fr": "French (fr)", "fi": "Finnish (fi)", "cs": "Czech (cs)", "nl": "Dutch (nl)",
-    "en": "English (en)", "bg": "Bulgarian (bg)", "da": "Danish (da)",
-    "de": "German (de)", "el": "Greek (el)", "es": "Spanish (es)",
-    "et": "Estonian (et)", "ga": "Irish (ga)", "hr": "Croatian (hr)",
-    "hu": "Hungarian (hu)", "it": "Italian (it)", "lt": "Lithuanian (lt)",
-    "lv": "Latvian (lv)",
+    "en": "English (en)", "bg": "Bulgarian (bg)", "ca": "Catalan (ca)",
+    "da": "Danish (da)", "de": "German (de)", "el": "Greek (el)",
+    "es": "Spanish (es)", "et": "Estonian (et)", "ga": "Irish (ga)",
+    "hr": "Croatian (hr)", "hu": "Hungarian (hu)", "it": "Italian (it)",
+    "lt": "Lithuanian (lt)", "lv": "Latvian (lv)", "mt": "Maltese (mt)",
+    "pl": "Polish (pl)", "pt": "Portuguese (pt)", "ro": "Romanian (ro)",
+    "sk": "Slovak (sk)", "sl": "Slovenian (sl)", "sv": "Swedish (sv)",
 }
 
 

@@ -280,7 +280,7 @@ position-0 limitation remains.
 The shuffled and short_ctx controls confirm the scoring mechanism is sound and the model
 genuinely tracks key→value bindings rather than memorising values.
 
-### Extended evaluation — all 35 languages (partial, 13 of 31 additional languages complete)
+### Extended evaluation — all 35 languages (partial, 22 of 31 additional languages complete)
 
 Eval grid identical to above (5 trials per cell). The pattern across all completed languages is
 extremely consistent: **2K–16K retrieval is 1.00, 32K depth ≥ 25% is 1.00**. The only
@@ -292,6 +292,7 @@ variation is at 32K depth=0%, shown below.
 |------|--------|-------------|---------|
 | en | Germanic | 0.80 | 0.96 |
 | bg | Slavic | 0.20 | 0.84 |
+| ca | Romance | 0.40 | 0.88 |
 | da | Germanic | 0.20 | 0.84 |
 | de | Germanic | 0.20 | 0.84 |
 | el | Hellenic | 0.20 | 0.84 |
@@ -303,22 +304,30 @@ variation is at 32K depth=0%, shown below.
 | it | Romance | 0.40 | 0.88 |
 | lt | Baltic | **1.00** | **1.00** |
 | lv | Baltic | 0.00 | 0.80 |
+| mt | Semitic | 0.00 | 0.80 |
+| pl | Slavic | 0.20 | 0.84 |
+| pt | Romance | 0.40 | 0.88 |
+| ro | Romance | 0.20 | 0.84 |
+| sk | Slavic | 0.00 | 0.80 |
+| sl | Slavic | 0.20 | 0.84 |
+| sv | Germanic | 0.60 | 0.92 |
 
-*(Remaining 18 languages — MT through UK — evaluation in progress, job 18755581)*
+*(Remaining 9 languages — eu gl is lb mk no oc sq sr uk — evaluation in progress, job 18755581)*
 
 **Notable results:**
 
-- **Lithuanian (lt) scores 1.00 at 32K depth=0%** — the only language so far with perfect
-  retrieval across all contexts and depths. This is exceptional and suggests the LT training
-  data provides unusually strong positional anchoring at position 0.
+- **Lithuanian (lt) scores 1.00** — the only language with perfect retrieval across all contexts
+  and depths. All other languages show degradation at 32K depth=0%.
 
-- **Croatian (hr) and Latvian (lv) score 0.00** — below chance, meaning the model
-  systematically anti-predicts the correct answer at depth=0% / 32K. This is stronger than
-  random chance in the wrong direction, likely due to the attention-sink pattern at position 0
-  interfering with specific n-gram statistics in these languages.
+- **Croatian (hr), Latvian (lv), Maltese (mt), and Slovak (sk) score 0.00** — the model
+  systematically anti-predicts at 32K depth=0%, consistently choosing the wrong answer. These
+  four languages have the strongest attention-sink interference at position 0.
 
-- **Irish (ga) and English (en) score 0.80** — substantially better than the 0.20 modal
-  value seen in most languages.
+- **Swedish (sv) scores 0.60** — the best Germanic language and second overall (behind lt).
+  Irish (ga) and English (en) follow at 0.80 and 0.80 respectively.
+
+- **Modal score is 0.20** — the majority of European languages land here (bg, da, de, el, es,
+  hu, pl, ro, sl). Above 0.20: et/it/ca/pt at 0.40, sv at 0.60, ga/en at 0.80, lt at 1.00.
 
 The 32K avg column assumes all non-depth=0% cells are 1.00 (confirmed for all tested languages).
 Full per-language per-depth tables will be added once the eval completes.
