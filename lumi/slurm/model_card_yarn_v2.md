@@ -304,6 +304,86 @@ variation is at 32K depth=0%, shown below.
 The 32K avg column assumes all non-depth=0% cells are 1.00 (confirmed for all tested languages).
 Full per-language per-depth tables will be added once the eval completes.
 
+## Understanding the 32K beginning-of-context retrieval failure
+
+### What the problem looks like
+
+When a key→value fact is placed at the **very start** of a 32 768-token context and the
+question about it comes at the **very end**, the model often retrieves the wrong answer —
+even though it retrieves correctly at every other position. This is the depth=0% / 32K cell
+that shows 0.00–0.80 accuracy across languages.
+
+The same model retrieves perfectly when the fact is anywhere else in the context:
+place it 25% of the way in, or 50%, or 75%, and accuracy is 1.00. The problem is
+specific to the combination of **position 0** and **maximum context length**.
+
+### Why it happens: two compounding effects
+
+**Effect 1 — Attention sinks.**
+Transformers learn that the first token of a sequence is a convenient "dump" for
+attention weight that doesn't need to go anywhere useful. This is called an attention
+sink. The token at position 0 ends up receiving a disproportionate share of attention
+from every later position — not because of its content, but because of its position.
+
+When an important fact *is* placed at position 0, this creates a paradox: the model
+concentrates attention there for structural reasons, but that same structural concentration
+makes it hard to distinguish "I'm looking at position 0 because it's the sink" from
+"I'm looking at position 0 because the answer is there." The two signals interfere.
+
+**Effect 2 — Rotary position encoding at maximum stretch.**
+YaRN extends the context by rescaling rotary position embeddings (RoPE) — the mechanism
+the model uses to know how far apart two tokens are. When trained on 2 048 tokens and
+extended to 32 768, RoPE frequencies are scaled by a factor of 16. This works well in
+practice (as confirmed by the 1.00 scores at depths 25–100%), but the interpolation is
+most approximate at the extremes. A query at position 32 767 looking back to position 0
+is the single longest relative distance in the entire extended range — exactly where
+the positional encoding is least reliable.
+
+These two effects compound: position 0 is simultaneously the worst-represented
+distance under interpolated RoPE *and* the position structurally biased by the attention
+sink. Languages where the key's token sequence happens to strongly activate content-
+retrieval pathways despite these biases (Lithuanian, Irish, English) score well; others
+score near chance or below.
+
+### Why some languages score below chance
+
+Croatian (hr) and Latvian (lv) score 0.00 at this position — worse than random guessing.
+This means the model doesn't just fail to find the right answer; it consistently picks a
+wrong one. The most likely explanation is that the attention-sink signal at position 0,
+combined with the language's specific token distribution, causes the model to latch onto
+a distractor value whose n-gram context is superficially similar to what a correct
+completion looks like in that language. With 5 trials the confidence interval is wide,
+but the pattern (0/5 for both languages) is notable.
+
+### How to fix it
+
+Three practical approaches, roughly in order of ease:
+
+**1. Add more long-context training with early-needle examples (easiest).**
+The continuation pre-training data mix should include documents where key facts appear
+in the first few hundred tokens and are referenced near the end. This is under-represented
+in typical web-crawl corpora, which tend to front-load topic sentences followed by
+elaboration. Synthetic data in the form of question–document pairs where the question
+paraphrases the opening paragraph would directly address this gap.
+
+**2. Use a sink token rather than position 0 for content.**
+Adding a special `<sink>` token at position 0 before the actual document text gives the
+attention-sink behaviour a structurally empty target. All of the model's sink-seeking
+attention goes to the sink token instead of the first content token. This requires
+fine-tuning with the sink token in place, but does not change the architecture.
+LM-Infinite and StreamingLLM both demonstrate this approach effectively.
+
+**3. Train with a small position offset.**
+Prepend a short fixed prefix (e.g. a language tag or separator) before all documents,
+so that the first meaningful token never sits at position 0. The sink forms at the
+prefix tokens, leaving positions 1+ free for content retrieval. This is the lowest-cost
+change and can be applied by modifying the data formatting before the next training run.
+
+Any of these approaches, combined with targeted evaluation on the depth=0% / 32K cell
+as a training signal, should close the gap. The fact that Lithuanian already scores 1.00
+without any special treatment shows the architecture is capable of this; the problem is
+a distributional one that can be addressed through data and fine-tuning.
+
 ## Training framework
 
 Trained using [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) with MCore on the
