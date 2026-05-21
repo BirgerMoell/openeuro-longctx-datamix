@@ -157,6 +157,25 @@ No instruction following required — the model scores candidates purely by log 
 - **Languages:** French (fr), Finnish (fi), Czech (cs), Dutch (nl) — chosen to span Romance,
   Finnic, Slavic, and Germanic families for comparison with prior OpenEuroLLM evals.
 
+### Visualisations
+
+**Comparison languages** (fr, fi, cs, nl — 10 trials/cell, matching v1 eval):
+
+![NIAH heatmaps — comparison languages](figures/niah_comparison_languages.png)
+
+**Extended languages — batch 1** (en, bg, da, de, el, es, et, ga — 5 trials/cell):
+
+![NIAH heatmaps — extended batch 1](figures/niah_extended_batch1.png)
+
+**Extended languages — batch 2** (hr, hu, it, lt, lv — 5 trials/cell):
+
+![NIAH heatmaps — extended batch 2](figures/niah_extended_batch2.png)
+
+**32K depth=0% summary** — the single weak cell across all 17 evaluated languages.
+All other context lengths and depths score 1.00.
+
+![32K depth=0% bar chart](figures/niah_32k_depth0_summary.png)
+
 ### Summary — accuracy by language × context length (avg across all depths)
 
 | lang | 2K | 4K | 8K | 16K | 32K |
