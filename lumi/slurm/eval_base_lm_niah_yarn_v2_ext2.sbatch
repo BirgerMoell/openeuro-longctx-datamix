@@ -8,8 +8,8 @@
 #SBATCH --time=12:00:00
 #SBATCH --gpus-per-node=1
 #SBATCH --account=project_462000963
-#SBATCH -o /scratch/project_462000963/bmoell/niah-v2-ext2-%j.out
-#SBATCH -e /scratch/project_462000963/bmoell/niah-v2-ext2-%j.err
+#SBATCH -o /flash/project_462000963/bmoell/niah-v2-ext2-%j.out
+#SBATCH -e /flash/project_462000963/bmoell/niah-v2-ext2-%j.err
 
 # Follow-up to eval_base_lm_niah_yarn_v2_extended.sbatch (job 18746959).
 # That job crashed with "Disk quota exceeded" on scratch after completing
