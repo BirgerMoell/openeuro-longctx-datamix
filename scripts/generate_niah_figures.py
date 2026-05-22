@@ -1,6 +1,6 @@
 """
 Generate NIAH evaluation figures for the YaRN v2 multilingual model card.
-Produces four PNG files saved to lumi/slurm/figures/.
+Produces six PNG files saved to lumi/slurm/figures/.
 """
 
 import os
@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from matplotlib.colors import LinearSegmentedColormap
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "../lumi/slurm/figures")
@@ -41,27 +42,41 @@ COMPARISON = {
 }
 
 EXTENDED = {
+    # batch 1
     "en": make_grid(d0=0.80),
     "bg": make_grid(d0=0.20),
-    "ca": make_grid(d0=0.40),
     "da": make_grid(d0=0.20, c4k=[1.00, 0.80, 1.00, 1.00, 1.00]),
     "de": make_grid(d0=0.20),
     "el": make_grid(d0=0.20),
     "es": make_grid(d0=0.20),
     "et": make_grid(d0=0.40),
     "ga": make_grid(d0=0.80),
+    # batch 2
     "hr": make_grid(d0=0.00),
     "hu": make_grid(d0=0.20),
     "it": make_grid(d0=0.40, c2k=[1.00, 1.00, 0.80, 1.00, 1.00]),
     "lt": make_grid(d0=1.00),
     "lv": make_grid(d0=0.00),
+    # batch 3
+    "ca": make_grid(d0=0.40, c2k=[1.00, 0.80, 1.00, 1.00, 1.00]),
     "mt": make_grid(d0=0.00),
-    "pl": make_grid(d0=0.20),
+    "pl": make_grid(d0=0.20, c16k=[1.00, 1.00, 1.00, 0.80, 1.00]),
     "pt": make_grid(d0=0.40),
     "ro": make_grid(d0=0.20),
-    "sk": make_grid(d0=0.00),
+    "sk": make_grid(d0=0.00, c4k=[1.00, 0.80, 1.00, 1.00, 1.00]),
     "sl": make_grid(d0=0.20),
-    "sv": make_grid(d0=0.60),
+    "sv": make_grid(d0=0.60, c2k=[1.00, 0.80, 1.00, 1.00, 1.00]),
+    # batch 4
+    "eu": make_grid(d0=0.00),
+    "gl": make_grid(d0=0.60, c2k=[1.00, 0.80, 1.00, 1.00, 1.00]),
+    "is": make_grid(d0=0.00),
+    "lb": make_grid(d0=0.20, c16k=[0.80, 1.00, 1.00, 1.00, 1.00]),
+    "mk": make_grid(d0=0.20),
+    "no": make_grid(d0=0.00),
+    "oc": make_grid(d0=0.40),
+    "sq": make_grid(d0=0.00),
+    "sr": make_grid(d0=0.20),
+    "uk": make_grid(d0=0.00),
 }
 
 LANG_LABELS = {
@@ -73,6 +88,10 @@ LANG_LABELS = {
     "lt": "Lithuanian (lt)", "lv": "Latvian (lv)", "mt": "Maltese (mt)",
     "pl": "Polish (pl)", "pt": "Portuguese (pt)", "ro": "Romanian (ro)",
     "sk": "Slovak (sk)", "sl": "Slovenian (sl)", "sv": "Swedish (sv)",
+    "eu": "Basque (eu)", "gl": "Galician (gl)", "is": "Icelandic (is)",
+    "lb": "Luxembourgish (lb)", "mk": "Macedonian (mk)", "no": "Norwegian (no)",
+    "oc": "Occitan (oc)", "sq": "Albanian (sq)", "sr": "Serbian (sr)",
+    "uk": "Ukrainian (uk)",
 }
 
 
@@ -94,6 +113,9 @@ def plot_heatmap(ax, grid, title, fs_title=13, fs_tick=11, fs_val=11):
     return im
 
 
+SUPTITLE_BASE = "NIAH Accuracy — {batch} (5 trials/cell)\nYaRN v2 Multilingual 9B · 32 768-token context"
+
+
 # ── Figure 1: Comparison languages — 2×2 grid ───────────────────────────────
 
 fig1, axes1 = plt.subplots(2, 2, figsize=(14, 12))
@@ -102,125 +124,128 @@ fig1.suptitle(
     "YaRN v2 Multilingual 9B · 32 768-token context",
     fontsize=15, fontweight="bold", y=1.01,
 )
-
 ims = []
 for ax, lang in zip(axes1.flat, ["fr", "fi", "cs", "nl"]):
-    im = plot_heatmap(ax, COMPARISON[lang], LANG_LABELS[lang])
-    ims.append(im)
-
+    ims.append(plot_heatmap(ax, COMPARISON[lang], LANG_LABELS[lang]))
 fig1.tight_layout(h_pad=3, w_pad=3)
 cbar = fig1.colorbar(ims[-1], ax=axes1.ravel().tolist(), fraction=0.025, pad=0.04)
 cbar.set_label("Accuracy", fontsize=12)
 cbar.ax.tick_params(labelsize=11)
-fig1.savefig(os.path.join(OUT_DIR, "niah_comparison_languages.png"),
-             dpi=150, bbox_inches="tight")
+fig1.savefig(os.path.join(OUT_DIR, "niah_comparison_languages.png"), dpi=150, bbox_inches="tight")
 plt.close(fig1)
-print("Saved figure 1")
+print("Saved figure 1 (comparison languages)")
 
 
 # ── Figure 2: Extended batch 1 — 2×4 grid ───────────────────────────────────
 
 BATCH1 = ["en", "bg", "da", "de", "el", "es", "et", "ga"]
-
 fig2, axes2 = plt.subplots(2, 4, figsize=(22, 12))
-fig2.suptitle(
-    "NIAH Accuracy — Extended Languages Batch 1 (5 trials/cell)\n"
-    "YaRN v2 Multilingual 9B · 32 768-token context",
-    fontsize=15, fontweight="bold",
-)
-
+fig2.suptitle(SUPTITLE_BASE.format(batch="Extended Languages Batch 1"), fontsize=15, fontweight="bold")
 ims = []
 for ax, lang in zip(axes2.flat, BATCH1):
-    im = plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang])
-    ims.append(im)
-
+    ims.append(plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang]))
 fig2.tight_layout(h_pad=3, w_pad=2)
 cbar = fig2.colorbar(ims[-1], ax=axes2.ravel().tolist(), fraction=0.015, pad=0.04)
 cbar.set_label("Accuracy", fontsize=12)
 cbar.ax.tick_params(labelsize=11)
-fig2.savefig(os.path.join(OUT_DIR, "niah_extended_batch1.png"),
-             dpi=150, bbox_inches="tight")
+fig2.savefig(os.path.join(OUT_DIR, "niah_extended_batch1.png"), dpi=150, bbox_inches="tight")
 plt.close(fig2)
-print("Saved figure 2")
+print("Saved figure 2 (batch 1)")
 
 
-# ── Figure 3: Extended batch 2 — 2+3 layout ─────────────────────────────────
-# 5 languages: top row 3, bottom row 2 (centred)
+# ── Figure 3: Extended batch 2 — 3+2 centred layout ─────────────────────────
 
 BATCH2 = ["hr", "hu", "it", "lt", "lv"]
-
 fig3 = plt.figure(figsize=(22, 12))
-fig3.suptitle(
-    "NIAH Accuracy — Extended Languages Batch 2 (5 trials/cell)\n"
-    "YaRN v2 Multilingual 9B · 32 768-token context",
-    fontsize=15, fontweight="bold",
-)
-
-# Top row: 3 panels
+fig3.suptitle(SUPTITLE_BASE.format(batch="Extended Languages Batch 2"), fontsize=15, fontweight="bold")
 top_axes = [fig3.add_subplot(2, 3, i + 1) for i in range(3)]
-# Bottom row: 2 panels centred using gridspec offset
-import matplotlib.gridspec as gridspec
 gs_bottom = gridspec.GridSpec(2, 6, figure=fig3)
 bot_ax1 = fig3.add_subplot(gs_bottom[1, 1:3])
 bot_ax2 = fig3.add_subplot(gs_bottom[1, 3:5])
-all_axes = top_axes + [bot_ax1, bot_ax2]
-
+all_axes3 = top_axes + [bot_ax1, bot_ax2]
 ims = []
-for ax, lang in zip(all_axes, BATCH2):
-    im = plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang])
-    ims.append(im)
-
+for ax, lang in zip(all_axes3, BATCH2):
+    ims.append(plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang]))
 fig3.tight_layout(h_pad=3, w_pad=2)
-cbar = fig3.colorbar(ims[-1], ax=all_axes, fraction=0.015, pad=0.04)
+cbar = fig3.colorbar(ims[-1], ax=all_axes3, fraction=0.015, pad=0.04)
 cbar.set_label("Accuracy", fontsize=12)
 cbar.ax.tick_params(labelsize=11)
-fig3.savefig(os.path.join(OUT_DIR, "niah_extended_batch2.png"),
-             dpi=150, bbox_inches="tight")
+fig3.savefig(os.path.join(OUT_DIR, "niah_extended_batch2.png"), dpi=150, bbox_inches="tight")
 plt.close(fig3)
-print("Saved figure 3")
+print("Saved figure 3 (batch 2)")
 
 
-# ── Figure 4: 32K depth=0% bar chart ────────────────────────────────────────
+# ── Figure 4: Extended batch 3 — 2×4 grid ───────────────────────────────────
 
-ALL_LANGS = list(COMPARISON.keys()) + list(EXTENDED.keys())
+BATCH3 = ["ca", "mt", "pl", "pt", "ro", "sk", "sl", "sv"]
+fig4, axes4 = plt.subplots(2, 4, figsize=(22, 12))
+fig4.suptitle(SUPTITLE_BASE.format(batch="Extended Languages Batch 3"), fontsize=15, fontweight="bold")
+ims = []
+for ax, lang in zip(axes4.flat, BATCH3):
+    ims.append(plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang]))
+fig4.tight_layout(h_pad=3, w_pad=2)
+cbar = fig4.colorbar(ims[-1], ax=axes4.ravel().tolist(), fraction=0.015, pad=0.04)
+cbar.set_label("Accuracy", fontsize=12)
+cbar.ax.tick_params(labelsize=11)
+fig4.savefig(os.path.join(OUT_DIR, "niah_extended_batch3.png"), dpi=150, bbox_inches="tight")
+plt.close(fig4)
+print("Saved figure 4 (batch 3)")
+
+
+# ── Figure 5: Extended batch 4 — 2×5 grid ───────────────────────────────────
+
+BATCH4 = ["eu", "gl", "is", "lb", "mk", "no", "oc", "sq", "sr", "uk"]
+fig5, axes5 = plt.subplots(2, 5, figsize=(28, 12))
+fig5.suptitle(SUPTITLE_BASE.format(batch="Extended Languages Batch 4"), fontsize=15, fontweight="bold")
+ims = []
+for ax, lang in zip(axes5.flat, BATCH4):
+    ims.append(plot_heatmap(ax, EXTENDED[lang], LANG_LABELS[lang]))
+fig5.tight_layout(h_pad=3, w_pad=2)
+cbar = fig5.colorbar(ims[-1], ax=axes5.ravel().tolist(), fraction=0.012, pad=0.04)
+cbar.set_label("Accuracy", fontsize=12)
+cbar.ax.tick_params(labelsize=11)
+fig5.savefig(os.path.join(OUT_DIR, "niah_extended_batch4.png"), dpi=150, bbox_inches="tight")
+plt.close(fig5)
+print("Saved figure 5 (batch 4)")
+
+
+# ── Figure 6: 32K depth=0% bar chart — all 35 languages ─────────────────────
+
 ALL_GRIDS = {**COMPARISON, **EXTENDED}
+ALL_LANGS = list(COMPARISON.keys()) + list(EXTENDED.keys())
 
-scores_32k_d0 = {lang: ALL_GRIDS[lang][4, 0] for lang in ALL_LANGS}
-sorted_langs = sorted(scores_32k_d0, key=scores_32k_d0.get)
-sorted_scores = [scores_32k_d0[l] for l in sorted_langs]
+scores_d0 = {lang: ALL_GRIDS[lang][4, 0] for lang in ALL_LANGS}
+sorted_langs = sorted(scores_d0, key=scores_d0.get)
+sorted_scores = [scores_d0[l] for l in sorted_langs]
 bar_colors = [CMAP(s) for s in sorted_scores]
 
-fig4, ax4 = plt.subplots(figsize=(18, 7))
-ax4.bar(range(len(sorted_langs)), sorted_scores, color=bar_colors,
+fig6, ax6 = plt.subplots(figsize=(22, 7))
+ax6.bar(range(len(sorted_langs)), sorted_scores, color=bar_colors,
         edgecolor="white", linewidth=0.8, width=0.7)
-
-ax4.set_xticks(range(len(sorted_langs)))
-ax4.set_xticklabels(
+ax6.set_xticks(range(len(sorted_langs)))
+ax6.set_xticklabels(
     [LANG_LABELS[l].split("(")[0].strip() for l in sorted_langs],
-    rotation=35, ha="right", fontsize=13,
+    rotation=40, ha="right", fontsize=12,
 )
-ax4.set_ylabel("Accuracy", fontsize=13)
-ax4.set_ylim(0, 1.2)
-ax4.set_title(
-    "32K context, needle at depth=0% — accuracy by language\n"
-    "YaRN v2 Multilingual 9B  ·  all other depths and context lengths score 1.00",
+ax6.set_ylabel("Accuracy", fontsize=13)
+ax6.set_ylim(0, 1.2)
+ax6.set_title(
+    "32K context, needle at depth=0% — accuracy by language (all 35 languages)\n"
+    "YaRN v2 Multilingual 9B  ·  all other depths and context lengths score ≥0.98",
     fontsize=14, fontweight="bold",
 )
-ax4.axhline(0.25, color="gray", linestyle="--", linewidth=1.5, label="Chance (0.25)")
-ax4.legend(fontsize=12)
-ax4.set_xlim(-0.6, len(sorted_langs) - 0.4)
-ax4.yaxis.grid(True, linestyle=":", alpha=0.5)
-ax4.set_axisbelow(True)
-ax4.tick_params(axis="y", labelsize=12)
-
+ax6.axhline(0.25, color="gray", linestyle="--", linewidth=1.5, label="Chance (0.25)")
+ax6.legend(fontsize=12)
+ax6.set_xlim(-0.6, len(sorted_langs) - 0.4)
+ax6.yaxis.grid(True, linestyle=":", alpha=0.5)
+ax6.set_axisbelow(True)
+ax6.tick_params(axis="y", labelsize=12)
 for i, (lang, score) in enumerate(zip(sorted_langs, sorted_scores)):
-    ax4.text(i, score + 0.04, f"{score:.2f}", ha="center", va="bottom",
-             fontsize=11, fontweight="bold")
-
-fig4.tight_layout()
-fig4.savefig(os.path.join(OUT_DIR, "niah_32k_depth0_summary.png"),
-             dpi=150, bbox_inches="tight")
-plt.close(fig4)
-print("Saved figure 4")
+    ax6.text(i, score + 0.04, f"{score:.2f}", ha="center", va="bottom",
+             fontsize=9, fontweight="bold")
+fig6.tight_layout()
+fig6.savefig(os.path.join(OUT_DIR, "niah_32k_depth0_summary.png"), dpi=150, bbox_inches="tight")
+plt.close(fig6)
+print("Saved figure 6 (32K depth=0% bar chart, 35 languages)")
 
 print(f"\nAll figures saved to {OUT_DIR}/")

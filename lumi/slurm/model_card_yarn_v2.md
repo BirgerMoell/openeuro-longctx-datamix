@@ -171,10 +171,18 @@ No instruction following required — the model scores candidates purely by log 
 
 <img src="figures/niah_extended_batch2.png" width="100%" alt="NIAH heatmaps — extended batch 2"/>
 
-**32K depth=0% summary** — the single weak cell across all 17 evaluated languages.
-All other context lengths and depths score 1.00.
+**Extended languages — batch 3** (ca, mt, pl, pt, ro, sk, sl, sv — 5 trials/cell):
 
-<img src="figures/niah_32k_depth0_summary.png" width="100%" alt="32K depth=0% bar chart"/>
+<img src="figures/niah_extended_batch3.png" width="100%" alt="NIAH heatmaps — extended batch 3"/>
+
+**Extended languages — batch 4** (eu, gl, is, lb, mk, no, oc, sq, sr, uk — 5 trials/cell):
+
+<img src="figures/niah_extended_batch4.png" width="100%" alt="NIAH heatmaps — extended batch 4"/>
+
+**32K depth=0% summary** — the single weak cell across all 35 languages.
+All other context lengths and depths score ≥0.98.
+
+<img src="figures/niah_32k_depth0_summary.png" width="100%" alt="32K depth=0% bar chart — all 35 languages"/>
 
 ### Summary — accuracy by language × context length (avg across all depths)
 
@@ -280,16 +288,20 @@ position-0 limitation remains.
 The shuffled and short_ctx controls confirm the scoring mechanism is sound and the model
 genuinely tracks key→value bindings rather than memorising values.
 
-### Extended evaluation — all 35 languages (partial, 22 of 31 additional languages complete)
+### Extended evaluation — all 35 languages (complete)
 
-Eval grid identical to above (5 trials per cell). The pattern across all completed languages is
-extremely consistent: **2K–16K retrieval is 1.00, 32K depth ≥ 25% is 1.00**. The only
+Eval grid identical to above (5 trials per cell). The pattern is extremely consistent across
+all 35 languages: **2K–16K retrieval is 1.00, 32K depth ≥ 25% is 1.00**. The only
 variation is at 32K depth=0%, shown below.
 
-#### 32K depth=0% accuracy by language (key metric — all other cells = 1.00)
+#### 32K depth=0% accuracy by language (key metric — all other cells ≥ 0.98)
 
 | lang | family | 32K depth=0% | 32K avg |
 |------|--------|-------------|---------|
+| fr | Romance | 0.20 | 0.84 |
+| fi | Finnic | 0.50 | 0.90 |
+| cs | Slavic | 0.20 | 0.84 |
+| nl | Germanic | 0.40 | 0.88 |
 | en | Germanic | 0.80 | 0.96 |
 | bg | Slavic | 0.20 | 0.84 |
 | ca | Romance | 0.40 | 0.88 |
@@ -298,39 +310,49 @@ variation is at 32K depth=0%, shown below.
 | el | Hellenic | 0.20 | 0.84 |
 | es | Romance | 0.20 | 0.84 |
 | et | Finnic | 0.40 | 0.88 |
+| eu | Language isolate | 0.00 | 0.80 |
 | ga | Celtic | 0.80 | 0.96 |
+| gl | Romance | 0.60 | 0.92 |
 | hr | Slavic | 0.00 | 0.80 |
 | hu | Uralic | 0.20 | 0.84 |
+| is | Germanic | 0.00 | 0.80 |
 | it | Romance | 0.40 | 0.88 |
+| lb | Germanic | 0.20 | 0.84 |
 | lt | Baltic | **1.00** | **1.00** |
 | lv | Baltic | 0.00 | 0.80 |
+| mk | Slavic | 0.20 | 0.84 |
 | mt | Semitic | 0.00 | 0.80 |
+| no | Germanic | 0.00 | 0.80 |
+| oc | Romance | 0.40 | 0.88 |
 | pl | Slavic | 0.20 | 0.84 |
 | pt | Romance | 0.40 | 0.88 |
 | ro | Romance | 0.20 | 0.84 |
 | sk | Slavic | 0.00 | 0.80 |
 | sl | Slavic | 0.20 | 0.84 |
+| sq | Albanian | 0.00 | 0.80 |
+| sr | Slavic | 0.20 | 0.84 |
 | sv | Germanic | 0.60 | 0.92 |
-
-*(Remaining 9 languages — eu gl is lb mk no oc sq sr uk — evaluation in progress, job 18755581)*
+| uk | Slavic | 0.00 | 0.80 |
 
 **Notable results:**
 
 - **Lithuanian (lt) scores 1.00** — the only language with perfect retrieval across all contexts
-  and depths. All other languages show degradation at 32K depth=0%.
+  and depths. All other languages show some degradation at 32K depth=0%.
 
-- **Croatian (hr), Latvian (lv), Maltese (mt), and Slovak (sk) score 0.00** — the model
-  systematically anti-predicts at 32K depth=0%, consistently choosing the wrong answer. These
-  four languages have the strongest attention-sink interference at position 0.
+- **9 languages score 0.00** at 32K depth=0% (eu, hr, is, lv, mt, no, sk, sq, uk) — the model
+  systematically anti-predicts at this position, consistently choosing a distractor. These
+  languages have the strongest attention-sink interference at position 0.
 
-- **Swedish (sv) scores 0.60** — the best Germanic language and second overall (behind lt).
-  Irish (ga) and English (en) follow at 0.80 and 0.80 respectively.
+- **Irish (ga) and English (en) score 0.80**, Galician (gl) and Swedish (sv) score 0.60 —
+  these four have the strongest beginning-of-context retrieval among non-Lithuanian languages.
 
-- **Modal score is 0.20** — the majority of European languages land here (bg, da, de, el, es,
-  hu, pl, ro, sl). Above 0.20: et/it/ca/pt at 0.40, sv at 0.60, ga/en at 0.80, lt at 1.00.
+- **Modal score is 0.20** — the majority of European languages (bg, cs, da, de, el, es, fr,
+  hu, lb, mk, pl, ro, sl, sr) cluster at this level. Above 0.20: ca/et/it/nl/oc/pt at 0.40,
+  fi at 0.50, gl/sv at 0.60, en/ga at 0.80, lt at 1.00.
 
-The 32K avg column assumes all non-depth=0% cells are 1.00 (confirmed for all tested languages).
-Full per-language per-depth tables will be added once the eval completes.
+- **Language family has limited predictive power.** Both Baltic languages split: lt=1.00,
+  lv=0.00. Both Germanic Scandinavian languages split: sv=0.60, no=0.00. The variation
+  likely reflects token-level statistics rather than typological features.
 
 ## Understanding the 32K beginning-of-context retrieval failure
 
