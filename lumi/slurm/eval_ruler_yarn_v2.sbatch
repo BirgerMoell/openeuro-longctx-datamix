@@ -48,9 +48,10 @@ echo "Model:   $MODEL_PATH"
 echo "Output:  $OUT_DIR"
 echo ""
 
-# Install lm_eval into flash if not present
+# Install lm_eval into flash if not already there
 singularity exec \
     --bind /pfs,/scratch,/projappl,/project,/flash,/appl \
+    --env PYTHONPATH="$LM_EVAL_DIR" \
     "$SIF" \
     python3 -c "import lm_eval" 2>/dev/null || \
 singularity exec \
@@ -71,6 +72,7 @@ for CTX in 4096 8192 16384 32768; do
     echo "--- Context length: ${CTX} tokens ---"
     singularity exec \
         --bind /pfs,/scratch,/projappl,/project,/flash,/appl \
+        --env PYTHONPATH="$LM_EVAL_DIR" \
         "$SIF" \
         python3 -m lm_eval \
             --model hf \
