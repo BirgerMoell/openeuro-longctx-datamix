@@ -7,7 +7,7 @@
 #SBATCH --partition=small-g
 #SBATCH --time=08:00:00
 #SBATCH --gpus-per-node=1
-#SBATCH --account=project_462000963
+#SBATCH --account=project_462002530
 #SBATCH -o /flash/project_462000963/bmoell/ruler-yarn-v2-%j.out
 #SBATCH -e /flash/project_462000963/bmoell/ruler-yarn-v2-%j.err
 
