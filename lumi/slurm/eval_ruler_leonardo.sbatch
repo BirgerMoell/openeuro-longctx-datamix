@@ -61,7 +61,7 @@ echo "Model:   birgermoell/oellm-9b-yarn-multilingual-v2-32k"
 echo "Output:  $OUT_DIR"
 echo ""
 
-MODEL="birgermoell/oellm-9b-yarn-multilingual-v2-32k"
+MODEL=/leonardo_work/OELLM_prod2026/models/oellm-9b-yarn-v2-32k
 
 # NIAH + aggregation tasks — QA skipped (requires instruction following)
 TASKS="niah_single_1,niah_single_2,niah_single_3,niah_multikey_1,niah_multikey_2,niah_multikey_3,niah_multivalue,niah_multiquery,ruler_cwe,ruler_fwe"

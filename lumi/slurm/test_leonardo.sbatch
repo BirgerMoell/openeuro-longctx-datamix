@@ -61,10 +61,13 @@ print('transformers:', transformers.__version__)
 echo ""
 
 echo "--- Quick model load (tokenizer only) ---"
+MODEL_LOCAL=/leonardo_work/OELLM_prod2026/models/oellm-9b-yarn-v2-32k
 python3 -c "
 from transformers import AutoTokenizer
-print('Loading tokenizer from HuggingFace...')
-tok = AutoTokenizer.from_pretrained('birgermoell/oellm-9b-yarn-multilingual-v2-32k')
+import os
+model_path = os.environ.get('MODEL_LOCAL', '/leonardo_work/OELLM_prod2026/models/oellm-9b-yarn-v2-32k')
+print('Loading tokenizer from', model_path)
+tok = AutoTokenizer.from_pretrained(model_path)
 test = tok('Hello, world! Bonjour le monde!')
 print('Tokenizer OK — %d tokens' % len(test['input_ids']))
 "
