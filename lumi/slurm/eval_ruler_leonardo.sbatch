@@ -7,7 +7,7 @@
 #SBATCH --partition=boost_usr_prod
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --account=PLACEHOLDER_ACCOUNT   # replace with your Leonardo project code
+#SBATCH --account=OELLM_prod2026
 #SBATCH -o $SCRATCH/ruler-yarn-v2-%j.out
 #SBATCH -e $SCRATCH/ruler-yarn-v2-%j.err
 

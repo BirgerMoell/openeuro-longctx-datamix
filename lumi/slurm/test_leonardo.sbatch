@@ -7,7 +7,7 @@
 #SBATCH --partition=boost_usr_prod
 #SBATCH --time=00:15:00
 #SBATCH --gres=gpu:1
-#SBATCH --account=PLACEHOLDER_ACCOUNT
+#SBATCH --account=OELLM_prod2026
 #SBATCH -o %j_test.out
 #SBATCH -e %j_test.err
 
