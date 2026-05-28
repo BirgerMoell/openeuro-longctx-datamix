@@ -26,7 +26,7 @@ echo ""
 
 echo "--- Modules ---"
 module purge
-module load python/3.11.7--gcc--8.5.0
+module load python/3.11.7
 module load cuda/12.1
 python3 --version
 echo ""
