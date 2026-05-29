@@ -32,7 +32,12 @@ set -euo pipefail
 
 # $WORK and $SCRATCH are set automatically by Leonardo's environment
 VENV=$WORK/ruler_venv        # persistent across jobs
-OUT_DIR=$SCRATCH/ruler-yarn-v2-$SLURM_JOB_ID
+OUT_DIR=/leonardo_scratch/large/userexternal/pmoell00/ruler-yarn-v2-$SLURM_JOB_ID
+
+# Point HF to pre-downloaded cache in $WORK — compute nodes have no internet
+export HF_HOME=$WORK/hf_cache
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 
 # Load modules
 module purge
