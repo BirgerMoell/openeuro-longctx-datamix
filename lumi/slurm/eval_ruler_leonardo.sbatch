@@ -82,6 +82,7 @@ for CTX in 4096 8192 16384 32768; do
         --output_path "$OUT_DIR/ctx_${CTX}" \
         --log_samples \
         --num_fewshot 0 \
+        --limit 100 \
         --batch_size 1 2>&1
     echo ""
 done
