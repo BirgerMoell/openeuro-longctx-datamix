@@ -8,7 +8,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/longrope-multilingual-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/longrope-multilingual-%j.err
 
@@ -93,11 +93,15 @@ mkdir -p "$CHECKPOINT_PATH" "$TENSORBOARD_DIR" "$DATA_CACHE_PATH"
 export HF_HOME="$WORKDIR/hf"
 
 # ── Data — our multilingual three-tier tokenized mix ─────────────────────────
-MULTILINGUAL_DIR=/flash/project_462000963/bmoell/data_tokenized_multilingual
-TOKENIZER_MODEL=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
-DATA_PATH="0.5 ${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document \
+MULTILINGUAL_DIR=${MULTILINGUAL_DIR:-/flash/project_462000963/bmoell/data_tokenized_multilingual}
+TOKENIZER_MODEL=${TOKENIZER_MODEL:-/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20}
+if [ -z "${DATA_PATH:-}" ] && [ -f "${MULTILINGUAL_DIR}/mix/data_path.args" ]; then
+    DATA_PATH="$(cat "${MULTILINGUAL_DIR}/mix/data_path.args")"
+elif [ -z "${DATA_PATH:-}" ]; then
+    DATA_PATH="0.5 ${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document \
 0.3 ${MULTILINGUAL_DIR}/multilingual_4_16k_text_document \
 0.2 ${MULTILINGUAL_DIR}/multilingual_under4k_text_document"
+fi
 
 # ── Model (9B: 32 layers, hidden 4096, 32 heads) ──────────────────────────────
 NUM_LAYERS=32

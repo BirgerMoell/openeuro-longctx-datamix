@@ -7,7 +7,7 @@
 #SBATCH --partition=dev-g
 #SBATCH --gpus-per-node=1
 #SBATCH --time=02:00:00
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/upload-yarn-v2-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/upload-yarn-v2-%j.err
 

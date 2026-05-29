@@ -8,7 +8,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/yarn-test-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/yarn-test-%j.err
 

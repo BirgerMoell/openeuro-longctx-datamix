@@ -8,7 +8,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/yarn-multilingual-test-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/yarn-multilingual-test-%j.err
 
@@ -86,9 +86,9 @@ mkdir -p "$CHECKPOINT_PATH" "$TENSORBOARD_DIR" "$DATA_CACHE_PATH"
 export HF_HOME="$WORKDIR/hf"
 
 # ── Data — long-context tier only (avoids BlendedMegatronDataset hang in smoke test)
-MULTILINGUAL_DIR=/flash/project_462000963/bmoell/data_tokenized_multilingual
-TOKENIZER_MODEL=/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20
-DATA_PATH="${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document"
+MULTILINGUAL_DIR=${MULTILINGUAL_DIR:-/flash/project_462000963/bmoell/data_tokenized_multilingual}
+TOKENIZER_MODEL=${TOKENIZER_MODEL:-/flash/project_462000963/jouni/checkpoints/converted-checkpoints/oellm-datamix-9b-80-20}
+DATA_PATH=${DATA_PATH:-"${MULTILINGUAL_DIR}/multilingual_16k_plus_text_document"}
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 NUM_LAYERS=32

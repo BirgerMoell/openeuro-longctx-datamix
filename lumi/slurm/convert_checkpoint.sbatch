@@ -7,7 +7,7 @@
 #SBATCH --partition=dev-g
 #SBATCH --time=00:30:00
 #SBATCH --gpus-per-node=1
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/convert-checkpoint-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/convert-checkpoint-%j.err
 

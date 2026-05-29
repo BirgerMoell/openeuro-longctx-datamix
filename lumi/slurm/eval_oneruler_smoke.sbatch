@@ -7,7 +7,7 @@
 #SBATCH --partition=dev-g
 #SBATCH --time=02:00:00
 #SBATCH --gpus-per-node=1
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/eval-oneruler-smoke-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/eval-oneruler-smoke-%j.err
 

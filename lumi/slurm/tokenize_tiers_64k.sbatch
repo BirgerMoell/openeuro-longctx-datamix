@@ -7,7 +7,7 @@
 #SBATCH --mem=256G
 #SBATCH --partition=standard-g
 #SBATCH --time=12:00:00
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/tokenize-tiers-64k-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/tokenize-tiers-64k-%j.err
 

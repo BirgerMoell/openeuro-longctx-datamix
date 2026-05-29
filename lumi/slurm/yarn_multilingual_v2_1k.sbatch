@@ -8,7 +8,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --exclusive
 #SBATCH --gpus-per-node=8
-#SBATCH --account=project_462000963
+#SBATCH --account=project_465002530
 #SBATCH -o /scratch/project_462000963/bmoell/yarn-v2-1k-%j.out
 #SBATCH -e /scratch/project_462000963/bmoell/yarn-v2-1k-%j.err
 
@@ -94,6 +94,11 @@ export FI_CXI_DEFAULT_CQ_SIZE=131072
 export PYTHONWARNINGS=ignore
 export NVTE_DEBUG=0
 export NVTE_DEBUG_LEVEL=0
+
+# Load W&B key from ~/.wandb_credentials (never commit the key itself)
+if [[ -f "$HOME/.wandb_credentials" ]]; then
+    source "$HOME/.wandb_credentials"
+fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 WORKDIR=/scratch/project_462000963/bmoell
@@ -362,6 +367,9 @@ OUTPUT_ARGS=(
     --log-throughput
     --log-progress
     --log-interval $LOG_INTERVAL
+    --wandb-project openeuro-longctx
+    --wandb-exp-name "yarn-v2-1k-${SLURM_JOBID}"
+    --wandb-entity birgermoell
 )
 
 if [ $PIPELINE_MODEL_PARALLEL_SIZE -gt 1 ] && [ $NUM_LAYERS_PER_VIRTUAL_PIPELINE_STAGE -gt 1 ]; then
