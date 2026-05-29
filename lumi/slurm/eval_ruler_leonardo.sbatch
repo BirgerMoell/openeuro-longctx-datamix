@@ -38,6 +38,7 @@ OUT_DIR=/leonardo_scratch/large/userexternal/pmoell00/ruler-yarn-v2-$SLURM_JOB_I
 export HF_HOME=$WORK/hf_cache
 export HF_DATASETS_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
+export NLTK_DATA=$WORK/nltk_data
 
 # Load modules
 module purge
