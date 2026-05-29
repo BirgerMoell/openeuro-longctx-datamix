@@ -8,8 +8,8 @@
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --account=OELLM_prod2026
-#SBATCH -o $SCRATCH/ruler-yarn-v2-%j.out
-#SBATCH -e $SCRATCH/ruler-yarn-v2-%j.err
+#SBATCH -o /leonardo_scratch/large/userexternal/pmoell00/ruler-yarn-v2-%j.out
+#SBATCH -e /leonardo_scratch/large/userexternal/pmoell00/ruler-yarn-v2-%j.err
 
 # RULER eval for YaRN v2 multilingual 9B model on Leonardo (CINECA).
 # Uses NVIDIA A100 64GB — CUDA, not ROCm.
