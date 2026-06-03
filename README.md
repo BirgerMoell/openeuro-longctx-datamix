@@ -2,6 +2,62 @@
 
 **A CLI that turns [`HuggingFaceFW/finepdfs-edu`](https://huggingface.co/datasets/HuggingFaceFW/finepdfs-edu) into a long-context data mix for [OpenEuroLLM](https://openeurollm.eu) / [NVIDIA-Megatron-LM (OpenEuroLLM fork)](https://github.com/OpenEuroLLM/NVIDIA-Megatron-LM).**
 
+---
+
+## Model evaluation: RULER results
+
+**Model:** [`birgermoell/oellm-9b-yarn-multilingual-v2-32k`](https://huggingface.co/birgermoell/oellm-9b-yarn-multilingual-v2-32k)  
+**Eval:** [RULER benchmark](https://github.com/hsiehjackson/RULER) · 100 samples/task · A100 64GB · base LM (no instruction tuning)  
+**Full results and methodology:** [`docs/ruler_eval_yarn_v2_32k.md`](docs/ruler_eval_yarn_v2_32k.md)
+
+### Scores
+
+| Task | 4K | 8K | 16K | 32K | What it tests |
+|------|-----|-----|------|------|---------------|
+| niah_single_1 | 1.00 | 1.00 | 1.00 | 0.62 | Retrieve 1 short needle (easiest) |
+| niah_single_2 | 0.66 | 0.35 | 0.02 | 0.02 | Retrieve 1 sentence needle |
+| niah_single_3 | 0.63 | 0.20 | 0.11 | 0.00 | Retrieve 1 long-phrase needle |
+| niah_multikey_1 | 0.34 | 0.33 | 0.31 | 0.04 | Find value among 2 keys |
+| niah_multikey_2 | 0.14 | 0.07 | 0.01 | 0.00 | Find value among 4 keys |
+| niah_multikey_3 | 0.06 | 0.01 | 0.01 | 0.00 | Find value among 8 keys |
+| niah_multivalue | 0.29 | 0.05 | 0.00 | 0.00 | Retrieve all values for one key |
+| niah_multiquery | 0.26 | 0.16 | 0.01 | 0.00 | Retrieve values for multiple keys |
+| ruler_cwe | 0.54 | 0.31 | 0.18 | 0.05 | Extract most frequent words |
+| ruler_fwe | 0.36 | 0.27 | 0.33 | 0.33 | Extract frequent words with distractors |
+| **AVG** | **0.43** | **0.28** | **0.20** | **0.11** | |
+
+### Figures
+
+![All tasks by context length](docs/figures/ruler_all_tasks.png)
+
+![Score heatmap](docs/figures/ruler_heatmap.png)
+
+![Scores by task category](docs/figures/ruler_by_category.png)
+
+### Analysis
+
+**What works well**
+
+- `niah_single_1` scores **1.0 at 4K, 8K, and 16K** and 0.62 at 32K. The model can reliably retrieve a single clearly-delimited fact across the full trained context. This is the primary confirmation that the YaRN context extension is working.
+- `ruler_fwe` stays flat at 0.27–0.36 across all context lengths. Frequent-word extraction is robust to context length, suggesting the model maintains broad attention over long sequences.
+- `niah_multikey_1` (2-key disambiguation) holds at 0.31–0.34 up to 16K before dropping at 32K, indicating moderate multi-key robustness within the trained range.
+
+**Where it degrades**
+
+- **Multi-value and multi-query tasks collapse quickly.** `niah_multivalue` goes 0.29 → 0.05 → 0.00 → 0.00 from 4K to 32K. These tasks require generating a structured list of answers — a base LM without instruction tuning struggles to format output correctly, so this reflects the eval setup as much as the model.
+- **niah_single_1 drops at 32K (1.0 → 0.62).** The easiest NIAH task degrading at the maximum context length is a signal to watch. It suggests the model is approaching its reliable retrieval limit and would benefit from continued training at 32K+.
+- **`ruler_cwe` degrades smoothly** (0.54 → 0.31 → 0.18 → 0.05), showing the model loses the ability to aggregate counts as context grows — a harder task that requires tracking statistics over the full document.
+
+**Things to focus on for further experiments**
+
+1. **Instruction-tune the model.** Multi-key, multi-value, and multi-query scores will improve substantially with instruction tuning — the base LM cannot produce the structured output these tasks expect. An instruction-tuned version is the fairest comparison point.
+2. **Extend context to 64K/128K.** The `niah_single_1` drop at 32K suggests the model isn't fully saturated — more training steps at longer contexts (staged: 32K→64K→128K) should push this score back to 1.0.
+3. **Train longer at 32K.** The current model was trained for 1K steps. More steps at the 32K stage may recover the `niah_single_1` regression without needing to go to a longer context first.
+4. **Evaluate multilingual NIAH.** All RULER tasks above use English haystacks. A multilingual NIAH (needles and haystacks in each of the 35 trained languages) would reveal whether context extension generalises equally across languages or degrades unevenly.
+5. **Run on a pre-YaRN baseline.** Comparing these scores against the base model without context extension would quantify the exact gain from YaRN training.
+
+---
+
 PDF-derived corpora are naturally long: unlike web text, documents routinely exceed 10K–100K tokens, which is exactly what you need for **context extension** (RoPE scaling / YaRN / LongRoPE continued pretraining). This tool:
 
 1. Shards and downloads FinePDFs-Edu by language.
