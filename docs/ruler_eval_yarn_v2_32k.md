@@ -22,7 +22,35 @@
 | ruler_fwe         | 0.360 | 0.273 | 0.333 | —   |
 | **AVG**           | **0.429** | **0.275** | **0.199** | — |
 
-32K pass did not complete — job hit the 8-hour wall time. To be rerun.
+32K pass did not complete — job hit the 8-hour wall time. Rerun as job 44150956.
+
+## Task descriptions
+
+### Needle In A Haystack (NIAH)
+
+The model is given a long document filled with filler text (Paul Graham essays). A "needle" — a short synthetic fact like *"The secret code is 42819"* — is hidden at a random position. The model must retrieve the exact value when asked.
+
+| Task | What it measures |
+|------|-----------------|
+| `niah_single_1` | Retrieve 1 needle. The needle is a simple UUID-style string. Easiest variant. |
+| `niah_single_2` | Retrieve 1 needle. The needle is a short sentence — slightly harder to extract by continuation. |
+| `niah_single_3` | Retrieve 1 needle. The needle is a longer phrase — hardest single-needle variant. |
+| `niah_multikey_1` | The needle has 2 keys; retrieve the value matching the queried key. Tests key disambiguation. |
+| `niah_multikey_2` | Same but 4 keys — harder disambiguation. |
+| `niah_multikey_3` | Same but 8 keys — requires the model to distinguish among many similar-looking entries. |
+| `niah_multivalue` | One key maps to multiple values; retrieve all of them. Requires generating a list. |
+| `niah_multiquery` | Multiple needles are hidden; retrieve the values for all queried keys in one pass. |
+
+Scoring: exact string match (or token-level F1 for multi-value). A base LM scores by generating a continuation — it doesn't "know" to stop after the answer, so multi-value/multi-query tasks are especially hard without instruction tuning.
+
+### Aggregation tasks
+
+| Task | What it measures |
+|------|-----------------|
+| `ruler_cwe` | **Common Words Extraction** — given a long list of words with repetitions, output the K most frequent ones. Tests whether the model can aggregate counts over a long context. |
+| `ruler_fwe` | **Frequent Words Extraction** — same idea but the list contains noisy distractor words at low frequency. Tests signal/noise separation over long contexts. |
+
+Scoring: set overlap between predicted words and ground-truth frequent words.
 
 ## Interpretation
 
