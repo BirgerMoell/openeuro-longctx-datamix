@@ -51,7 +51,7 @@ echo "Output: $OUT_DIR"
 echo ""
 
 # Tokenize each category independently (skip combined_shuffled — it's a duplicate)
-CATEGORIES="math code science if multiturn other"
+CATEGORIES="code science if multiturn other"
 
 singularity exec \
   -B "$BIND_DIRS" \
@@ -92,7 +92,7 @@ for category in $CATEGORIES; do
         --tokenizer-type HuggingFaceTokenizer \
         --tokenizer-model "$TOKENIZER" \
         --json-keys     text \
-        --workers       8 \
+        --workers       1 \
         --append-eod
 
     bin_size=$(du -sh "${OUTPUT_PREFIX}_text_document.bin" 2>/dev/null | cut -f1 || echo "?")
