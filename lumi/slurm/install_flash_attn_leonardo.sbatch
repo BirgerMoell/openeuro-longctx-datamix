@@ -25,7 +25,7 @@ set -euo pipefail
 
 VENV=$WORK/megatron_venv
 TARBALL=$WORK/flash_attn-2.8.3.tar.gz
-BUILD_DIR=/tmp/flash_attn_build_$SLURM_JOB_ID
+BUILD_DIR=$WORK/flash_attn_build_$SLURM_JOB_ID   # /tmp too small; use $WORK
 
 module purge
 module load gcc/12.2.0
@@ -47,7 +47,7 @@ cd "$BUILD_DIR"/flash_attn-2.8.3
 
 export MAX_JOBS=16
 # --no-deps: compute nodes have no internet; torch/einops already in venv
-pip install . --no-build-isolation --no-deps 2>&1
+pip install . --no-build-isolation --no-deps --verbose 2>&1
 
 echo ""
 python -c "import flash_attn; print('flash-attn', flash_attn.__version__)"
