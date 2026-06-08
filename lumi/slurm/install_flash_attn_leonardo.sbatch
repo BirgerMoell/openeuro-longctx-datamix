@@ -2,40 +2,52 @@
 #SBATCH --job-name=install-flash-attn
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=120G
 #SBATCH --partition=boost_usr_prod
-#SBATCH --time=00:10:00
+#SBATCH --time=02:00:00
+#SBATCH --gres=gpu:1
 #SBATCH --account=OELLM_prod2026
 #SBATCH -o /leonardo_scratch/large/userexternal/pmoell00/flash-attn-install-%j.out
 #SBATCH -e /leonardo_scratch/large/userexternal/pmoell00/flash-attn-install-%j.err
 
-# Install flash-attn 2.8.3 from the prebuilt GitHub wheel (no compilation needed).
-# The login node has internet; the wheel is for cu12+torch2.6+cxx11abiFALSE+cp311.
-# Run this on the login node — no GPU needed for wheel installation:
+# Build and install flash-attn 2.8.3 from source on a GPU compute node.
+# Requires: source tarball pre-downloaded to $WORK/flash_attn-2.8.3.tar.gz
 #
-#   source $WORK/megatron_venv/bin/activate
-#   pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl --no-deps
+# Why source build: prebuilt wheels require GLIBC 2.32; Leonardo has GLIBC 2.28.
+# Why gcc/12.2.0: system GCC 8.5 cannot compile PyTorch 2.6 C++ headers
+#   (constexpr overflow in DispatchKeySet.h).
+# Why cuda/12.6: torch was compiled with cu124; NVCC 12.6 is forward-compatible.
 #
-# This sbatch is kept for cases where the install must go through the job scheduler.
 # Submit: sbatch lumi/slurm/install_flash_attn_leonardo.sbatch
 
 set -euo pipefail
 
 VENV=$WORK/megatron_venv
-WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl"
+TARBALL=$WORK/flash_attn-2.8.3.tar.gz
+BUILD_DIR=/tmp/flash_attn_build_$SLURM_JOB_ID
 
 module purge
+module load gcc/12.2.0
+module load cuda/12.6
 module load python/3.11.7
 
 source "$VENV/bin/activate"
 
-echo "=== Installing flash-attn 2.8.3 (prebuilt wheel) — $(date) ==="
+echo "=== Building flash-attn — $(date) ==="
+echo "GCC:   $(gcc --version | head -1)"
+echo "GPU:   $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
+echo "CUDA:  $(nvcc --version | grep release)"
 echo "Torch: $(python -c 'import torch; print(torch.__version__, torch.version.cuda)')"
 echo ""
 
-# --no-deps: all runtime deps (torch, einops) are already in the venv
-pip install "$WHEEL_URL" --no-deps 2>&1
+mkdir -p "$BUILD_DIR"
+tar xzf "$TARBALL" -C "$BUILD_DIR"
+cd "$BUILD_DIR"/flash_attn-2.8.3
+
+export MAX_JOBS=16
+# --no-deps: compute nodes have no internet; torch/einops already in venv
+pip install . --no-build-isolation --no-deps 2>&1
 
 echo ""
 python -c "import flash_attn; print('flash-attn', flash_attn.__version__)"
