@@ -80,6 +80,7 @@ MODEL_ARGS=(
     --no-rope-fusion
     --no-persist-layer-norm
     --no-gradient-accumulation-fusion
+    --no-masked-softmax-fusion
     --no-async-tensor-model-parallel-allreduce
 )
 
