@@ -80,7 +80,6 @@ MODEL_ARGS=(
     --no-rope-fusion
     --no-persist-layer-norm
     --no-async-tensor-model-parallel-allreduce
-    --sequence-parallel
 )
 
 # ── Training ──────────────────────────────────────────────────────────────────
