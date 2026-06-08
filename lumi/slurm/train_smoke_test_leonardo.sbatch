@@ -110,7 +110,7 @@ DATA_ARGS=(
     --data-path $DATA_PATH
     --tokenizer-type HuggingFaceTokenizer
     --tokenizer-model "$TOKENIZER"
-    --split 990,9,1
+    --split 900,50,50
     --data-cache-path "$OUT_DIR/data_cache"
     --num-workers 4
 )
