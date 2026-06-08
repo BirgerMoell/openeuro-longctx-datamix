@@ -40,7 +40,8 @@ tar xzf "$TARBALL" -C "$BUILD_DIR"
 cd "$BUILD_DIR"/flash_attn-2.8.3
 
 export MAX_JOBS=16
-pip install . --no-build-isolation 2>&1
+# --no-deps: compute nodes have no internet; all deps (einops, torch) are already in the venv
+pip install . --no-build-isolation --no-deps 2>&1
 
 echo ""
 python -c "import flash_attn; print('flash-attn', flash_attn.__version__)"
