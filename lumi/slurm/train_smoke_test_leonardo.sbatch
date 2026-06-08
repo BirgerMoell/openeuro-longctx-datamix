@@ -77,6 +77,7 @@ MODEL_ARGS=(
     --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
     --pipeline-model-parallel-size $PIPELINE_MODEL_PARALLEL_SIZE
     --transformer-impl local
+    --no-rope-fusion
     --no-async-tensor-model-parallel-allreduce
     --sequence-parallel
 )
