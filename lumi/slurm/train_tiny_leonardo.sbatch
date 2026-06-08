@@ -119,10 +119,11 @@ DATA_ARGS=(
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_ARGS=(
     --log-interval 10
-    --save-interval 50
+    --save-interval 100
     --eval-interval 50
     --eval-iters 5
     --save "$OUT_DIR/checkpoints"
+    --ckpt-format torch
     --tensorboard-dir "$OUT_DIR/tensorboard"
     --log-throughput
 )
