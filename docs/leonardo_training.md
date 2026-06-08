@@ -96,9 +96,11 @@ Validates checkpoint saving and the full training loop at realistic batch size:
 sbatch lumi/slurm/train_tiny_leonardo.sbatch
 ```
 
-- Wall time: ~50 min
-- Checkpoints saved at iter 50 and 100 to `$SCRATCH/megatron-tiny-<jobid>/checkpoints/`
+- Wall time: ~45 min (measured: iter 10 at 13:05, iter 100 at 13:40)
+- Steady-state throughput: ~73 TFLOP/s/GPU at GBS=32
+- Checkpoint saved at iter 100 to `$SCRATCH/megatron-tiny-<jobid>/checkpoints/iter_0000100/` (~120 GB)
 - TensorBoard logs in `$SCRATCH/megatron-tiny-<jobid>/tensorboard/`
+- Uses `--ckpt-format torch` — the default `torch_dist` format triggers NCCL errors on Leonardo
 
 ### Monitoring jobs
 
@@ -129,7 +131,7 @@ Leonardo's bare CUDA environment (no Apex, no TE) needs five fusion features dis
 
 To recover full performance, install Apex with CUDA extensions on a compute node (requires internet access or pre-built wheels), or use the NVIDIA Megatron container which includes both Apex and TE.
 
-**Throughput impact without fused kernels:** ~58 TFLOP/s/GPU vs ~80+ with fused kernels on A100.
+**Throughput without fused kernels:** ~73 TFLOP/s/GPU at GBS=32 (vs ~80+ with full Apex/TE on A100).
 
 ---
 
