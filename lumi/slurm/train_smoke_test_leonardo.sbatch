@@ -79,6 +79,7 @@ MODEL_ARGS=(
     --transformer-impl local
     --no-rope-fusion
     --no-persist-layer-norm
+    --no-gradient-accumulation-fusion
     --no-async-tensor-model-parallel-allreduce
 )
 
