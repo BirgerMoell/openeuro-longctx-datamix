@@ -49,10 +49,12 @@ mkdir -p "$BUILD_DIR"
 tar xzf "$TARBALL" -C "$BUILD_DIR"
 cd "$BUILD_DIR"/flash_attn-2.8.3
 
-# MAX_JOBS=8: previous runs with 16 were OOM-killed (each NVCC process ~8GB × 16 > 120GB).
+# Compile for A100 only (sm_80). Leonardo has no H100; skipping sm_90 halves
+# compile time and /tmp disk use (only 10GB available on compute nodes).
+export TORCH_CUDA_ARCH_LIST="8.0"
+export MAX_JOBS=8
 # --no-deps: no internet on compute nodes; torch/einops already in venv
 # --no-cache-dir: pip persistent cache is on a different filesystem
-export MAX_JOBS=8
 pip install . --no-build-isolation --no-deps --no-cache-dir 2>&1
 
 echo ""
