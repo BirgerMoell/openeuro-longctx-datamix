@@ -51,7 +51,7 @@ echo "Output: $OUT_DIR"
 echo ""
 
 # Tokenize each category independently (skip combined_shuffled — it's a duplicate)
-CATEGORIES="code science if multiturn other"
+CATEGORIES="science if multiturn other"
 
 singularity exec \
   -B "$BIND_DIRS" \
@@ -68,6 +68,7 @@ CATEGORIES=$5
 export PYTHONPATH=$MEGATRON_DIR:${PYTHONPATH:-}
 export MIOPEN_USER_DB_PATH="/tmp/$(whoami)-miopen-cache"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
+export TOKENIZERS_PARALLELISM=false
 mkdir -p "$MIOPEN_USER_DB_PATH"
 
 for category in $CATEGORIES; do
