@@ -90,6 +90,7 @@ MODEL_ARGS=(
     --untie-embeddings-and-output-weights
     --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
     --pipeline-model-parallel-size $PIPELINE_MODEL_PARALLEL_SIZE
+    --transformer-impl local
     --use-legacy-models
     --no-rope-fusion
     --no-persist-layer-norm
