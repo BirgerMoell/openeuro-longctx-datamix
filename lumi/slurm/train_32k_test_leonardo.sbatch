@@ -72,9 +72,11 @@ echo "World:   $WORLD_SIZE ranks"
 echo "Out:     $OUT_DIR"
 echo ""
 
-# ── Parallelism: TP=2, PP=2 → 4 GPUs ─────────────────────────────────────────
-TENSOR_MODEL_PARALLEL_SIZE=2
-PIPELINE_MODEL_PARALLEL_SIZE=2
+# ── Parallelism: TP=4, PP=1 → 4 GPUs ─────────────────────────────────────────
+# TP=4 quarters the MLP intermediate tensor (32768×3584 bf16 = 225 MB),
+# fitting within 64 GB where TP=2 (448 MB) caused SwiGLU OOM.
+TENSOR_MODEL_PARALLEL_SIZE=4
+PIPELINE_MODEL_PARALLEL_SIZE=1
 
 # ── Model: 9B architecture with YaRN RoPE at 32K ────────────────────────────
 MODEL_ARGS=(
