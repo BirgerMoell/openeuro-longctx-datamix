@@ -140,6 +140,7 @@ LOG_ARGS=(
     --eval-interval 10
     --eval-iters 2
     --save "$OUT_DIR/checkpoints"
+    --ckpt-format torch
     --tensorboard-dir "$OUT_DIR/tensorboard"
     --log-throughput
 )
