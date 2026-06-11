@@ -55,6 +55,8 @@ python -c "import flash_attn; print('flash-attn', flash_attn.__version__)" || {
 }
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+# The 32K single-node run sits within ~1 GB of A100-64GB capacity with Adam.
+# Avoid allocator fragmentation consuming the final margin.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_PORT=9997
@@ -87,6 +89,8 @@ MODEL_ARGS=(
     --rotary-base 500000
     --normalization RMSNorm
     --swiglu
+    --attention-dropout 0.0
+    --hidden-dropout 0.0
     --disable-bias-linear
     --untie-embeddings-and-output-weights
     --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
@@ -97,6 +101,7 @@ MODEL_ARGS=(
     --no-persist-layer-norm
     --no-gradient-accumulation-fusion
     --no-masked-softmax-fusion
+    --no-bias-dropout-fusion
     --no-async-tensor-model-parallel-allreduce
     --use-flash-attn
 )
@@ -121,6 +126,7 @@ TRAINING_ARGS=(
     --bf16
     --recompute-activations
     --recompute-granularity full
+    --empty-unused-memory-level 1
 )
 
 # ── Data ──────────────────────────────────────────────────────────────────────
