@@ -90,7 +90,7 @@ MODEL_ARGS=(
     --untie-embeddings-and-output-weights
     --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
     --pipeline-model-parallel-size $PIPELINE_MODEL_PARALLEL_SIZE
-    --transformer-impl local
+    --use-legacy-models
     --no-rope-fusion
     --no-persist-layer-norm
     --no-gradient-accumulation-fusion
@@ -140,7 +140,6 @@ LOG_ARGS=(
     --eval-interval 10
     --eval-iters 2
     --save "$OUT_DIR/checkpoints"
-    --ckpt-format torch
     --tensorboard-dir "$OUT_DIR/tensorboard"
     --log-throughput
 )
