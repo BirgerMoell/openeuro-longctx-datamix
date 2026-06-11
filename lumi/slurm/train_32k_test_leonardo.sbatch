@@ -37,8 +37,14 @@ OUT_DIR=/leonardo_scratch/large/userexternal/pmoell00/megatron-32k-$SLURM_JOB_ID
 mkdir -p "$OUT_DIR/checkpoints" "$OUT_DIR/tensorboard" "$OUT_DIR/data_cache"
 
 module purge
+module load gcc/12.2.0
+module load cuda/12.6
 module load python/3.11.7
-module load cuda/12.1
+
+# flash-attn requires GLIBCXX_3.4.29; Python's spack RPATH picks up gcc-8.5.0
+# libstdc++ instead of gcc-12.2.0, so we force the right one via LD_PRELOAD.
+GCC12_LIB=$(gcc -print-file-name=libstdc++.so.6)
+export LD_PRELOAD=$GCC12_LIB${LD_PRELOAD:+:$LD_PRELOAD}
 
 source "$VENV/bin/activate"
 
