@@ -1,8 +1,8 @@
 # Leonardo 32K Smoke Test — Debug Log
 
 **Date:** 2026-06-11  
-**Goal:** Verify 10-step Megatron-LM training at `seq_len=32768` on Leonardo (1 node, 4× A100-SXM-64GB).  
-**Script:** `lumi/slurm/train_32k_test_leonardo.sbatch`
+**Status:** ✅ PASSED — 10/10 iterations completed, job 45790387  
+**Script:** `lumi/slurm/train_32k_test_leonardo_2nodes.sbatch`
 
 ---
 
@@ -104,37 +104,56 @@ if args.recompute_activations:
 | A100-SXM-64GB capacity | 63.42 GB |
 | Observed peak | ~60 GB |
 
-The observed ~60 GB is ~3 GB over theoretical — likely cuBLAS workspace and fragmentation. This leaves ~530 MiB at the MLP backward recompute, which is not enough for the 896 MiB dense_h_to_4h output (TP=2) or 448 MiB (TP=4).
+The observed ~60 GB is ~3 GB over theoretical — likely cuBLAS workspace and fragmentation. In the TP=2 runs the failing SwiGLU recompute already has the 896 MiB dense_h_to_4h output resident, then needs a fresh 448 MiB allocation for `silu(x[0])` / multiply. TP=4 should cut those tensors to roughly 448 MiB resident plus 224 MiB fresh allocation.
 
 ---
 
-## Current status
+## Results
 
-All configurations tested on a single node fail with OOM at the MLP layer:
+| Job | Nodes | Config | Result |
+|-----|-------|--------|--------|
+| 45752954 | 1 | TP=2 PP=2, selective recompute | OOM in bias_dropout (448 MiB, 74 MiB short) |
+| 45754649 | 1 | TP=2 PP=2, no jit fusion | OOM in swiglu silu (448 MiB, 74 MiB short) |
+| 45755485 | 1 | TP=4 PP=1, selective | OOM in dense_h_to_4h (448 MiB, 169 MiB short) |
+| 45767785 | 1 | TP=2 PP=2, full recompute | OOM in dense_h_to_4h backward (896 MiB, 363 MiB short) |
+| 45773570 | 2 | TP=2 PP=2 DP=2, dist. optimizer | OOM in swiglu silu (448 MiB, up to 420 MiB short) |
+| 45775847 | 2 | TP=2 PP=2 DP=2, dist. optimizer, no grad overlap | OOM in swiglu silu (448 MiB, up to 436 MiB short) |
+| 45777471 | 2 | TP=4 PP=1 DP=2, dist. optimizer | OOM in residual/RMSNorm recompute (256-512 MiB short) |
+| **45779119** | **2** | **TP=4 PP=1 DP=2, sequence parallel, dist. optimizer** | **✅ 2/2 iterations, peak 55.4 GB** |
+| **45790387** | **2** | **same config** | **✅ 10/10 iterations, peak 55.4 GB — SMOKE TEST PASSED** |
 
-| Job | Config | OOM at | Free | Need | Short by |
-|-----|--------|--------|------|------|----------|
-| 45752954 | TP=2 PP=2, selective recompute | bias_dropout silu | 374 MiB | 448 MiB | 74 MiB |
-| 45754649 | TP=2 PP=2, selective, no jit fuse | swiglu silu | 374 MiB | 448 MiB | 74 MiB |
-| 45755485 | TP=4 PP=1, selective | dense_h_to_4h | 279 MiB | 448 MiB | 169 MiB |
-| 45767785 | TP=2 PP=2, full recompute | dense_h_to_4h (backward) | 533 MiB | 896 MiB | 363 MiB |
+**Root cause of single-node failures:** 9B model + Adam at 32K fills ~60 GB per A100-64GB regardless of TP/PP configuration — the optimizer states, gradient buffers, activation checkpoints, and CUDA workspace leave only ~500 MiB free, not enough for the MLP backward recompute tensors.
 
-**Root cause:** 9B model with Adam at 32K sequence fills ~60 GB per A100-64GB regardless of TP/PP, leaving insufficient headroom for the large MLP activations.
+**What made it work:** `--sequence-parallel` shards the residual stream (one 256 MB tensor per layer) across the TP=4 group, reducing per-rank activation memory by 4×. Combined with TP=4 (quarters the MLP intermediates), `--use-distributed-optimizer` (shards Adam states across DP=2), and 2 nodes — peak drops to 55.4 GB with 8 GB headroom.
 
 ---
 
-## Path forward
+## Verified working configuration (job 45790387)
 
-### Option A — 2 nodes (recommended)
+```
+2 nodes × 4× A100-SXM-64GB = 8 GPUs
+TP=4, PP=1, DP=2
+--sequence-parallel
+--use-distributed-optimizer
+--recompute-granularity full --recompute-method uniform --recompute-num-layers 32
+GBS=2, MBS=1, seq_len=32768
+Peak memory: 55.4 GB / 63.4 GB
+Throughput: ~105 TFLOP/s/GPU (iterations 2–10)
+```
 
-With 2 nodes (8 GPUs), TP=2, PP=2, DP=2 + `--use-distributed-optimizer`:
-- Adam states sharded across DP=2: saves ~9 GB/GPU
-- Peak memory: ~47 GB → 16 GB headroom
-- Script: `lumi/slurm/train_32k_test_leonardo_2nodes.sbatch` (TODO)
-
-### Option B — 1 node at 16K
-
-Run smoke test at `seq_len=16384` (half the memory for sequence-dependent tensors). Verifies the pipeline end-to-end; does not prove 32K fits on 1 node (it doesn't).
+10-iteration loss trace (random init, sanity check only):
+```
+iter  1: lm_loss=13.28, grad_norm=23.2
+iter  2: lm_loss=13.09, grad_norm=27.7
+iter  3: lm_loss=13.55, grad_norm=240.4
+iter  4: lm_loss=12.55, grad_norm=37.5
+iter  5: lm_loss=12.62, grad_norm=50.2
+iter  6: lm_loss=12.78, grad_norm=113.2
+iter  7: lm_loss=12.44, grad_norm=50.1
+iter  8: lm_loss=12.37, grad_norm=42.2
+iter  9: lm_loss=12.00, grad_norm=31.3
+iter 10: lm_loss=12.39, grad_norm=41.1
+```
 
 ---
 
@@ -152,3 +171,6 @@ Run smoke test at `seq_len=16384` (half the memory for sequence-dependent tensor
 | `d6ff3c7` | Use SGD no momentum (attempted optimizer savings) |
 | `0364b63` | Fix recompute: drop --recompute-activations |
 | `bf755ec` | Add --recompute-num-layers 16 |
+| `0364b63` | Fix recompute: drop --recompute-activations flag |
+| `92d8337` | Add debug log and 2-node sbatch |
+| `55c88c5` | Set train-iters to 10; 2-node smoke test passes |
