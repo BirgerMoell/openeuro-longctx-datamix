@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=megatron-32k-2n
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=8
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=480G
 #SBATCH --partition=boost_usr_prod
 #SBATCH --time=01:00:00
@@ -11,24 +11,14 @@
 #SBATCH -o /leonardo_scratch/large/userexternal/pmoell00/megatron-32k-2n-%j.out
 #SBATCH -e /leonardo_scratch/large/userexternal/pmoell00/megatron-32k-2n-%j.err
 
-# 10-step long-context training test on Leonardo (2 nodes, 8x A100 64GB).
-# seq_len=32768, TP=2, PP=2, DP=2, GBS=8, distributed optimizer.
+# Short long-context training smoke on Leonardo (2 nodes, 8x A100 64GB).
+# seq_len=32768, TP=4, PP=1, DP=2, SP, GBS=2, distributed optimizer.
 #
-# Why 2 nodes: 9B model + Adam optimizer at 32K fills ~60 GB on a single
-# A100-64GB, leaving insufficient headroom for the MLP intermediate tensors.
-# With DP=2 and --use-distributed-optimizer, Adam states are sharded across
-# both DP ranks, saving ~9 GB/GPU and giving ~16 GB of headroom.
-#
-# Memory budget (per GPU, TP=2 PP=2 DP=2 + distributed optimizer):
-#   BF16 model:            ~4.6 GB
-#   FP32 grad buffer/2:    ~4.6 GB
-#   FP32 master weights/2: ~4.6 GB
-#   Adam m1/2:             ~4.6 GB
-#   Adam m2/2:             ~4.6 GB
-#   BF16 .grad tensors:    ~4.6 GB
-#   Checkpoints (full):    ~8 GB
-#   NCCL + CUDA:           ~3 GB
-#   Peak total:            ~39 GB  ← 24 GB headroom on 64 GB A100
+# Why 2 nodes: 9B model + Adam optimizer at 32K fills ~60 GB on A100-64GB
+# before the first optimizer step. DP=2 sharding is still needed for Adam, but
+# by itself did not reduce the first backward recompute peak enough. TP=4 cuts
+# the MLP tensors, and sequence parallel targets the residual/RMSNorm activations
+# that killed the TP=4/no-SP run.
 #
 # Prerequisites:
 #   flash-attn installed: sbatch lumi/slurm/install_flash_attn_leonardo.sbatch
@@ -67,7 +57,8 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_PORT=9997
-export WORLD_SIZE=$SLURM_NTASKS   # 8 total (4 per node × 2 nodes)
+GPUS_PER_NODE=4
+export WORLD_SIZE=$((SLURM_NNODES * GPUS_PER_NODE))
 
 export HF_HOME=$WORK/hf_cache
 export TRANSFORMERS_OFFLINE=1
@@ -79,9 +70,9 @@ echo "World:   $WORLD_SIZE ranks"
 echo "Out:     $OUT_DIR"
 echo ""
 
-# ── Parallelism: TP=2, PP=2, DP=2 → 8 GPUs ───────────────────────────────────
-TENSOR_MODEL_PARALLEL_SIZE=2
-PIPELINE_MODEL_PARALLEL_SIZE=2
+# ── Parallelism: TP=4, PP=1, DP=2 → 8 GPUs ───────────────────────────────────
+TENSOR_MODEL_PARALLEL_SIZE=4
+PIPELINE_MODEL_PARALLEL_SIZE=1
 # DP=2 is implicit: WORLD_SIZE / (TP × PP) = 8 / 4 = 2
 
 # ── Model: 9B architecture with YaRN RoPE at 32K ─────────────────────────────
@@ -103,6 +94,7 @@ MODEL_ARGS=(
     --untie-embeddings-and-output-weights
     --tensor-model-parallel-size $TENSOR_MODEL_PARALLEL_SIZE
     --pipeline-model-parallel-size $PIPELINE_MODEL_PARALLEL_SIZE
+    --sequence-parallel
     --transformer-impl local
     --use-legacy-models
     --no-rope-fusion
@@ -117,7 +109,7 @@ MODEL_ARGS=(
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAINING_ARGS=(
     --micro-batch-size 1
-    --global-batch-size 8
+    --global-batch-size 2
     --seq-length 32768
     --train-iters 10
     --optimizer adam
@@ -134,7 +126,6 @@ TRAINING_ARGS=(
     --recompute-method uniform
     --recompute-num-layers 16
     --use-distributed-optimizer
-    --overlap-grad-reduce
     --empty-unused-memory-level 1
 )
 
@@ -153,8 +144,8 @@ DATA_ARGS=(
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_ARGS=(
     --log-interval 1
-    --save-interval 10
-    --eval-interval 10
+    --save-interval 1000
+    --eval-interval 1000
     --eval-iters 2
     --save "$OUT_DIR/checkpoints"
     --ckpt-format torch
@@ -163,13 +154,19 @@ LOG_ARGS=(
 )
 
 echo "Launching 32K 2-node training..."
-torchrun \
-    --nproc_per_node=4 \
+srun \
+    --nodes=2 \
+    --ntasks=2 \
+    --ntasks-per-node=1 \
+    --cpus-per-task=32 \
+    bash -lc 'torchrun \
+    --nproc_per_node='"$GPUS_PER_NODE"' \
     --nnodes=2 \
     --node_rank=$SLURM_NODEID \
-    --master_addr=$MASTER_ADDR \
-    --master_port=$MASTER_PORT \
-    $MEGATRON_DIR/pretrain_gpt.py \
+    --master_addr='"$MASTER_ADDR"' \
+    --master_port='"$MASTER_PORT"' \
+    '"$MEGATRON_DIR"'/pretrain_gpt.py \
+        "$@"' bash \
         "${MODEL_ARGS[@]}" \
         "${TRAINING_ARGS[@]}" \
         "${DATA_ARGS[@]}" \
