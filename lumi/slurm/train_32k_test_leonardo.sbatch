@@ -114,16 +114,18 @@ TRAINING_ARGS=(
     --global-batch-size 4
     --seq-length 32768
     --train-iters 10
-    --optimizer sgd
-    --sgd-momentum 0.0
+    --optimizer adam
+    --adam-beta1 0.9
+    --adam-beta2 0.95
+    --adam-eps 1e-8
     --lr 1e-5
     --lr-decay-style cosine
     --min-lr 1e-6
     --weight-decay 0.1
     --clip-grad 1.0
     --bf16
-    --recompute-activations
     --recompute-granularity full
+    --recompute-method uniform
     --empty-unused-memory-level 1
 )
 
