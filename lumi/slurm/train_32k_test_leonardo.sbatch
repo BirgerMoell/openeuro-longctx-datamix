@@ -126,6 +126,7 @@ TRAINING_ARGS=(
     --bf16
     --recompute-granularity full
     --recompute-method uniform
+    --recompute-num-layers 16
     --empty-unused-memory-level 1
 )
 
