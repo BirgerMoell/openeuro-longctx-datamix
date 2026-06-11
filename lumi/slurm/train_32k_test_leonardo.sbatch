@@ -55,6 +55,7 @@ python -c "import flash_attn; print('flash-attn', flash_attn.__version__)" || {
 }
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_PORT=9997
 export WORLD_SIZE=$SLURM_NTASKS
