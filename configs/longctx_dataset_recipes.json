@@ -91,6 +91,35 @@
         "Preserve natural order for books, legal bundles, and repositories",
         "Cap any single source family so the model does not learn a synthetic separator-only domain"
       ],
+      "minimal_2m_experiment_command": {
+        "script": "scripts/construct_long_context_documents.py",
+        "source": "hf-finepdfs",
+        "output_dir": "/leonardo_scratch/large/userexternal/pmoell00/data/oellm_2m_constructed/raw",
+        "prefix": "oellm_constructed_256k",
+        "split": "train",
+        "languages": [
+          "en",
+          "sv",
+          "de",
+          "fr",
+          "fi",
+          "hu",
+          "ro",
+          "sr",
+          "uk",
+          "pl",
+          "cs",
+          "sk",
+          "tr"
+        ],
+        "target_tokens": [
+          262144
+        ],
+        "examples_per_language_per_length": 16,
+        "min_doc_tokens": 4096,
+        "min_fill_ratio": 0.92,
+        "hf_shards_per_language": 0
+      },
       "acceptance_checks": [
         "At least 80 percent of 512K+ examples contain multiple relevant segments",
         "Every example has document-boundary markers",
