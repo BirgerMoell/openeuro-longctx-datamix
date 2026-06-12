@@ -459,6 +459,20 @@ def scheduled_max_position(step: int, train_steps: int, start_position: int | No
     return int(round(math.exp(log_start + progress * (log_end - log_start))))
 
 
+def scheduled_depth(
+    rng: random.Random,
+    step: int,
+    train_steps: int,
+    fallback_depths: list[float],
+    train_depths: list[float] | None,
+    depth_schedule: list[float] | None,
+) -> float:
+    if depth_schedule:
+        idx = min(len(depth_schedule) - 1, int((step - 1) * len(depth_schedule) / max(1, train_steps)))
+        return depth_schedule[idx]
+    return rng.choice(train_depths or fallback_depths)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
@@ -485,6 +499,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=0.0)
     p.add_argument("--last-n-layers", type=int, default=2)
     p.add_argument("--no-train-lm-head", action="store_true")
+    p.add_argument("--generative-weight", type=float, default=1.0)
     p.add_argument("--contrastive-weight", type=float, default=0.0)
     p.add_argument("--contrastive-wrong-candidates", type=int, default=3)
     p.add_argument("--contrastive-temperature", type=float, default=1.0)
@@ -495,6 +510,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-every", type=int, default=50)
     p.add_argument("--eval-lengths", default="4096,8192,16384")
     p.add_argument("--eval-depths", default="0.05,0.5,0.9")
+    p.add_argument("--train-depths", default=None)
+    p.add_argument("--train-depth-schedule", default=None)
     p.add_argument("--eval-trials", type=int, default=4)
     p.add_argument("--distractors", type=int, default=32)
     p.add_argument("--wrong-candidates", type=int, default=7)
@@ -509,6 +526,8 @@ def main() -> None:
     args = parse_args()
     rng = random.Random(args.seed)
     torch.manual_seed(args.seed)
+    if args.generative_weight == 0.0 and args.contrastive_weight == 0.0:
+        raise ValueError("At least one of --generative-weight or --contrastive-weight must be non-zero")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     dtype = {
@@ -563,6 +582,8 @@ def main() -> None:
 
     eval_lengths = parse_ints(args.eval_lengths)
     eval_depths = parse_floats(args.eval_depths)
+    train_depths = parse_floats(args.train_depths) if args.train_depths else None
+    train_depth_schedule = parse_floats(args.train_depth_schedule) if args.train_depth_schedule else None
     run_config = vars(args) | {
         "device": str(device),
         "actual_dtype": str(dtype),
@@ -601,7 +622,14 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         total_loss = 0.0
         for _ in range(args.grad_accum):
-            depth = rng.choice(eval_depths)
+            depth = scheduled_depth(
+                rng,
+                step,
+                args.train_steps,
+                fallback_depths=eval_depths,
+                train_depths=train_depths,
+                depth_schedule=train_depth_schedule,
+            )
             ex = make_retrieval_example(
                 tokenizer,
                 rng,
@@ -614,26 +642,28 @@ def main() -> None:
             eos = tokenizer.eos_token_id
             ids = ex.prompt_ids + ex.answer_ids + ([eos] if eos is not None else [])
             input_ids = torch.tensor([ids], dtype=torch.long, device=device)
-            position_ids = make_position_ids(
-                rng,
-                input_ids.shape[1],
-                max_position=scheduled_max_position(
-                    step,
-                    args.train_steps,
-                    args.train_start_position,
-                    args.max_position,
-                ),
-                device=device,
-                strategy=args.position_strategy,
-                example=ex,
-            )
             train_max_position = scheduled_max_position(
                 step,
                 args.train_steps,
                 args.train_start_position,
                 args.max_position,
             )
-            loss = suffix_loss(model, input_ids, position_ids, len(ex.prompt_ids))
+            position_ids = make_position_ids(
+                rng,
+                input_ids.shape[1],
+                max_position=train_max_position,
+                device=device,
+                strategy=args.position_strategy,
+                example=ex,
+            )
+            loss = torch.zeros((), device=device, dtype=torch.float32)
+            if args.generative_weight:
+                loss = loss + args.generative_weight * suffix_loss(
+                    model,
+                    input_ids,
+                    position_ids,
+                    len(ex.prompt_ids),
+                )
             if args.contrastive_weight:
                 loss = loss + args.contrastive_weight * contrastive_retrieval_loss(
                     model,
