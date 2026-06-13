@@ -517,6 +517,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wrong-candidates", type=int, default=7)
     p.add_argument("--value-kind", choices=["code", "status"], default="code")
     p.add_argument("--seed", type=int, default=20260612)
+    p.add_argument("--eval-seed", type=int, default=None)
     p.add_argument("--local-files-only", action="store_true")
     p.add_argument("--save-final", action="store_true")
     return p.parse_args()
@@ -601,7 +602,7 @@ def main() -> None:
         before = evaluate(
             model,
             tokenizer,
-            rng,
+            random.Random(args.eval_seed or (args.seed + 10_000)),
             lengths=eval_lengths,
             depths=eval_depths,
             trials=args.eval_trials,
@@ -691,7 +692,7 @@ def main() -> None:
             record["eval"] = evaluate(
                 model,
                 tokenizer,
-                rng,
+                random.Random(args.eval_seed or (args.seed + 10_000)),
                 lengths=eval_lengths,
                 depths=eval_depths,
                 trials=args.eval_trials,
@@ -709,7 +710,7 @@ def main() -> None:
     final_eval = evaluate(
         model,
         tokenizer,
-        rng,
+        random.Random(args.eval_seed or (args.seed + 10_000)),
         lengths=eval_lengths,
         depths=eval_depths,
         trials=args.eval_trials,
