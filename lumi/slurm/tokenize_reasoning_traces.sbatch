@@ -51,7 +51,7 @@ echo "Output: $OUT_DIR"
 echo ""
 
 # Tokenize each category independently (skip combined_shuffled — it's a duplicate)
-CATEGORIES="science if multiturn other"
+CATEGORIES=${CATEGORIES:-"science if multiturn other"}
 
 singularity exec \
   -B "$BIND_DIRS" \
