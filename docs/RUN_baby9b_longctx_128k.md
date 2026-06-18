@@ -1,7 +1,8 @@
 # Long-Context Extension Run — baby_9b_dense → 128K (multilingual)
 
-**Started:** 2026-06-18 · **Cluster:** LUMI (AMD MI250X / ROCm) · **Job:** `19345342`
-**Status:** RUNNING (real run, ~6k GPU-h)
+**Started:** 2026-06-18 · **Cluster:** LUMI (AMD MI250X / ROCm) · **Job:** `19345889`
+**Status:** RUNNING (real run, ~6k GPU-h). *First launch `19345342` hung on MIOpen kernel
+search → cancelled & relaunched with the MIOpen fix below.*
 
 ## What we're doing
 Extending the OpenEuroLLM **baby_9b_dense** base model (Qwen3 dense ~9B) from its **native 4K**
@@ -62,6 +63,19 @@ FinePDFs = naturally long PDF documents → genuine long-range signal (not just 
 - Container `laif-rocm-6.4.4-…sif`; Megatron `…/luomajou/oellm-test/NVIDIA-Megatron-LM`.
 - **Compute: ~6,000 GPU-h (~2% of the 300k LUMI budget), ~2 days wall.**
 
+### Required ROCm/MIOpen fix (credit: Jouni Luoma)
+On AMD, MIOpen auto-tunes kernels for each new tensor shape. At long sequence lengths this
+search hangs 30–60+ min and the idle ranks then **NCCL/comms time out → the job dies**. Since
+this run changes seq length 4× (16K/32K/64K/128K), we set:
+```bash
+export MIOPEN_FIND_MODE=FAST                        # pick first working kernel; skip the search
+export MIOPEN_USER_DB_PATH=/flash/.../bmoell/miopen_cache   # persistent perf-db across stages/runs
+export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
+```
+Without this, the first launch (`19345342`) sat 21 min with no training output and was headed
+for the 30-min distributed timeout. The persistent `/flash` cache means tuned shapes are reused
+on later stages/runs (Jouni's suggestion: prepopulate the cache once, keep it on /flash).
+
 ## Evaluation — base-model mode
 The model is a **base** LM (no SFT), so RULER is run in **forced-completion / log-likelihood**
 mode on **retrieval** tasks only — NIAH (single/multi key/value/query), Variable Tracking,
@@ -83,6 +97,8 @@ vLLM-ROCm generation stack wired.
 - `ruler_eval.sh` — per-stage base-LM RULER eval (skeleton; needs vLLM-ROCm)
 
 ## Key learnings / gotchas
+- **MIOpen kernel search → NCCL timeout** at long seq: set `MIOPEN_FIND_MODE=FAST` (+ persistent
+  `MIOPEN_USER_DB_PATH` on /flash). Without it the run hangs and dies on comms timeout. (Jouni)
 - Must `export WORLD_SIZE=$SLURM_NTASKS` (else `world size 1 not divisible by TP×CP`).
 - `long-ctx-sample/arxiv.idx` is corrupt → use the catalogue paths (verified).
 - `torch_dist` is parallelism-agnostic → load at any TP/PP/CP, no conversion.
