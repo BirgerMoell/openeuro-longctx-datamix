@@ -96,7 +96,39 @@ vLLM-ROCm generation stack wired.
 - `extend_128k_standalone.sh` — single 128K feasibility test
 - `ruler_eval.sh` — per-stage base-LM RULER eval (skeleton; needs vLLM-ROCm)
 
+## Language coverage per stage (IMPORTANT)
+| Stage | seq | finepdfs languages | total blend sources | notes |
+|------:|----:|:------------------:|:-------------------:|-------|
+| 16K | 16384  | **37 (all OELLM)** | 41 | full multilingual |
+| 32K | 32768  | **37 (all OELLM)** | 41 | full multilingual |
+| 64K | 65536  | **37 (all OELLM)** | 41 | full multilingual (verified in job 19380028 log: als…ukr) |
+| 128K | 131072 | **37 (all OELLM)** ← definitive run | 41 | *(an interim 128K attempt used a trimmed 8-source mix while chasing an OOM that turned out unrelated; the definitive 128K uses all 37)* |
+
+The 37 finepdfs languages: als bos bul cat ces dan deu ekk ell eng eus fin fra gle glg hrv
+hun isl ita kat lit lvs mkd mlt nld nno nob pol por ron slk slv spa srp swe tur ukr — plus
+finepdfs-edu (eng), starcoder (code), finemath (math), nemotron-cc (web). English upsampled
+20×, every other language floor-weighted (~1.15% each).
+
+## Run history
+- `19345342` — hung on MIOpen kernel search → cancelled.
+- `19345889` — MIOpen fixed; trained **16K ✓ + 32K ✓** (37 langs, checkpoints saved), then
+  **host-RAM OOM at 64K iter ~239** = the mid-stage eval point (eval dataloader over all 41
+  sub-datasets spiked CPU RAM; GPU only 69%). Fix: disable mid-stage eval + `--num-workers 1`.
+- `19377604` — resume attempt; exit-2 (an inline `#comment` leaked into the arg string) → fixed.
+- `19380028` — resumed from `ckpt_32768`; trained **64K ✓ (all 37 langs)** → `ckpt_65536`
+  saved, then **host-RAM OOM entering 128K** (mis-attributed to the 41 sources at the time).
+- `19387078` — 128K from `ckpt_65536` with a **trimmed 8-source** mix → OOM'd AGAIN at the
+  first 128K step, proving sources were NOT the cause.
+- `19387894` — added **`--no-create-attention-mask-in-dataloader`** (the real fix: an explicit
+  128K×128K host mask ≈ 16 GB/sample → host OOM; only bites at 128K) + `--num-workers 0`.
+  8-source confirmation run.
+- **Definitive 128K** — once the mask fix is confirmed, rerun 128K with **all 37 languages**
+  (`extend_real_to128k.sh`, which has the full mix + mask fix; skips 16K/32K/64K).
+
 ## Key learnings / gotchas
+- **Mid-stage eval → host-RAM OOM** with a many-source blend at long seq: the eval dataloader
+  instantiates all sub-datasets and spikes CPU RAM. Set `--eval-interval` huge / `--eval-iters 0`
+  for the training run; eval (RULER) separately. (Also `--num-workers 1` to trim dataloader RAM.)
 - **MIOpen kernel search → NCCL timeout** at long seq: set `MIOPEN_FIND_MODE=FAST` (+ persistent
   `MIOPEN_USER_DB_PATH` on /flash). Without it the run hangs and dies on comms timeout. (Jouni)
 - Must `export WORLD_SIZE=$SLURM_NTASKS` (else `world size 1 not divisible by TP×CP`).
