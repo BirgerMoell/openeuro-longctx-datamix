@@ -1,8 +1,22 @@
 # Long-Context Extension Run — baby_9b_dense → 128K (multilingual)
 
-**Started:** 2026-06-18 · **Cluster:** LUMI (AMD MI250X / ROCm) · **Job:** `19345889`
-**Status:** RUNNING (real run, ~6k GPU-h). *First launch `19345342` hung on MIOpen kernel
-search → cancelled & relaunched with the MIOpen fix below.*
+**Started:** 2026-06-18 · **Completed:** 2026-06-21 07:15 · **Cluster:** LUMI (AMD MI250X / ROCm)
+**Status:** ✅ COMPLETE — all 4 stages (16K/32K/64K/128K) trained + checkpointed, all 37 OELLM languages.
+Final job for 128K: `19388172` (the MIOpen + mask fixes are in `extend_real_to128k.sh`).
+
+## Result
+| Stage | checkpoint | seq | θ | final loss |
+|------:|-----------|----:|--:|:----------:|
+| 16K | `output_real/ckpt_16384`  | 16384  | 500k | ~1.35 |
+| 32K | `output_real/ckpt_32768`  | 32768  | 1M   | ~1.37 |
+| 64K | `output_real/ckpt_65536`  | 65536  | 2M   | ~1.33 |
+| 128K | `output_real/ckpt_131072` (iter 119, 256 shards, 119 GB) | 131072 | 5M | ~1.36 |
+
+baby_9b_dense (Qwen3 9B) extended **native 4K → 128K** across **all 37 OELLM languages** via
+progressive native ABF, ~10B tokens, loss stable ~1.3–1.4 / 0 NaN throughout. 128K stage:
+9h31m on 16 nodes, mem ~43% (mask fix). Checkpoints in
+`/scratch/project_465002530/users/bmoell/longctx-extend/output_real/`.
+**Next:** base-LM RULER/OneRuler eval (completion mode) at 4K/16K/64K/128K to confirm retrieval.
 
 ## What we're doing
 Extending the OpenEuroLLM **baby_9b_dense** base model (Qwen3 dense ~9B) from its **native 4K**
