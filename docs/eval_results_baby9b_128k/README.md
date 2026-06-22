@@ -46,3 +46,23 @@ Adding more of the 37 languages = add their needle templates in `scripts/eval_ba
 ## TODO / known speedup
 The scorer recomputes the long prefix forward once **per candidate** (4×). Caching the prefix
 KV once and scoring all 4 candidate tails would be ~4× faster — worth doing for 128K evals.
+
+## v1 128K baseline — final (3 languages, depth-stratified)
+
+The definitive v1 baseline (to compare the length-biased v2 against). Base-LM NIAH, chance 25%.
+
+**By depth (the key signal):**
+| needle depth | accuracy |
+|---|---|
+| 0.0 (far start) | **0%** (0/50) |
+| 0.25 | 30% (15/50) |
+| 0.5 | 93% (38/41) |
+| 0.75 | 97% (34/35) |
+| 1.0 (end) | 100% (25/25) |
+
+**By language:** cs 59%, fi 56%, fr 54%.
+
+**Read:** clean *recency gradient* — near-perfect retrieval for the back ~60% of the 128K
+window, total failure at the far front. Consistent across languages. This is the undersampling
+fingerprint (only ~0.19B genuine ≥128K tokens trained). **v2 success metric = lifting
+depth-0 (0%) and depth-0.25 (30%)** via the length-biased data + bigger budget.
