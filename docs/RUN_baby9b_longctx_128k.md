@@ -153,3 +153,23 @@ finepdfs-edu (eng), starcoder (code), finemath (math), nemotron-cc (web). Englis
 - dev-g 30-min cap is too short for staged runs / large index builds → use standard-g.
 - Saves between independent `--finetune` stages can be weights-only; this run keeps full saves
   (resumable). Run is resumable per stage (skips stages whose checkpoint exists).
+
+## Parallel run & comparison (Jouni Luoma / Silo AI)
+
+Jouni is running an independent long-context extension on the same baby_9b_dense, for comparison.
+
+| | This run (AI Sweden / Birger) | Jouni's run (Silo AI) |
+|---|---|---|
+| Curriculum | 16K→32K→64K→128K (2× steps from 16K; baby native 4K) | 4K→16K→64K→128K (4× steps) |
+| RoPE base (θ) | 500k→1M→2M→**5M** @128K | 100k→500k→1M→**2M** @128K |
+| Tokens | ~10B total (4B/3B/2B/1B) — lean | longer training (more tokens) |
+| Method | native ABF, no YaRN | native ABF |
+
+**θ A/B at 128K:** the two runs differ at the final stage — **5M (ours) vs 2M (Jouni's)**.
+Both are above the NTK-aware minimum (~3.25M for 128K from θ_base 100k); ours is conservative,
+Jouni's is closer to the NTK estimate. Comparing **RULER/NIAH at 128K** between the two runs is
+a cheap, useful A/B on the rope-base choice (and on lean-vs-longer token budget). Worth running
+the same `scripts/eval_base_lm_niah.py` on both resulting checkpoints for an apples-to-apples number.
+
+**Status (2026-06-22):** Jouni's 64K stage running, 128K stage starting ~today. Ours complete
+through 128K (checkpoints saved); 128K eval in progress.
