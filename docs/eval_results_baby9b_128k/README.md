@@ -47,22 +47,29 @@ Adding more of the 37 languages = add their needle templates in `scripts/eval_ba
 The scorer recomputes the long prefix forward once **per candidate** (4×). Caching the prefix
 KV once and scoring all 4 candidate tails would be ~4× faster — worth doing for 128K evals.
 
-## v1 128K baseline — final (3 languages, depth-stratified)
+## v1 128K performance — current/final (depth-stratified)
 
-The definitive v1 baseline (to compare the length-biased v2 against). Base-LM NIAH, chance 25%.
+The definitive v1 baseline (to compare the length-biased v2 against). Base-LM forced-choice
+NIAH, 4-way, chance 25%. 217 trials across cs/fi/fr (+nl just starting). Job 19419241.
 
-**By depth (the key signal):**
-| needle depth | accuracy |
+**Overall: 57% (123/217).**
+
+**By depth (the key signal — very stable):**
+| needle depth (position in window) | accuracy |
 |---|---|
-| 0.0 (far start) | **0%** (0/50) |
+| 0.0 (far start / oldest) | **0%** (0/55) |
 | 0.25 | 30% (15/50) |
-| 0.5 | 93% (38/41) |
-| 0.75 | 97% (34/35) |
-| 1.0 (end) | 100% (25/25) |
+| 0.5 (middle) | 93% (38/41) |
+| 0.75 | 97% (35/36) |
+| 1.0 (end / most recent) | 100% (35/35) |
 
-**By language:** cs 59%, fi 56%, fr 54%.
+**By language:** cs 68% (34/50), fi 56% (37/66), fr 54% (52/96). (nl 0/5 — only depth-0 so far.)
 
-**Read:** clean *recency gradient* — near-perfect retrieval for the back ~60% of the 128K
-window, total failure at the far front. Consistent across languages. This is the undersampling
-fingerprint (only ~0.19B genuine ≥128K tokens trained). **v2 success metric = lifting
-depth-0 (0%) and depth-0.25 (30%)** via the length-biased data + bigger budget.
+**Read:** clean *recency gradient* — **near-perfect retrieval for the back ~60% of the 128K
+window (depth ≥0.5 = 93–100%), total failure at the far front (depth 0 = 0%).** Consistent
+across languages. This is the undersampling fingerprint (only ~0.19B genuine ≥128K tokens
+trained). The model genuinely *uses* a 128K window for recent/mid content but can't anchor the
+oldest quarter.
+
+**v2 success metric = lifting depth-0 (0%) and depth-0.25 (30%)** via the length-biased data
+(Jouni's tiered sample) + bigger 128K budget. Back-half is already saturated.
