@@ -57,3 +57,24 @@ Expected: ~0.19B → multiple-B genuine ≥128K tokens at the final stage → mu
 ## Scripts
 - `scripts/build_longctx_mix.py` — the length-biased sampler (Megatron builder, validated).
 - `scripts/undersample_analysis.py` — recomputes the effective-fraction table from any mix.
+
+## Update: using Jouni Luoma's length-biased sample (recommended)
+
+Jouni built a complete length-biased long-context dataset at
+`/flash/project_465002530/preprocessed/oellm-v1-256k/long-ctx-sample` — **54.8B tokens, 152
+sources, all validated**. It is the **entire pretraining domain mix, length-biased** (tiered
+short/medium/long, `long_threshold=64K`, ~50–83% of tokens in long docs per source) and
+multilingual: finepdfs (all langs + edu), dclm, hplt3 (38 langs), multisynth (synthetic
+multilingual), nemotron, megamath, starcoder, pes2o, arxiv, opus-mt, wiki.
+
+This is **better than our finepdfs-only extraction** (full domain coverage + the proper
+"keep domain mix, upsample long within domain" recipe, Fu et al.) and it **aligns our run
+with Jouni's** for a clean θ A/B. So the v2 rerun (`extend-v2-jouni`) uses this dataset
+(token-proportional weighting) for both stages:
+
+```
+ckpt_32768 -> [64K, CP=2, 3B tok] -> ckpt_65536_v2 -> [128K, CP=8, 2B tok] -> ckpt_131072_v2
+```
+Our own `build_longctx_mix.py` (finepdfs ≥128K extraction) is kept as a tool/fallback if
+depth-0 needs even more ≥128K-specific content. Note: Jouni's `fix_idx_doc_count.py` repaired
+the index issues (the earlier corrupt `arxiv.idx`), so the whole sample is clean.
