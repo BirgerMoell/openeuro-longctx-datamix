@@ -83,3 +83,48 @@ LongRoPE2-style searched per-dim scaling (and Jouni's YaRN patch as one A/B arm)
 needle-driven PPL.
 
 Script: `longctx-extend/theta_sweep.sbatch` (on LUMI).
+
+## RESULTS — θ is the fix (2026-06-25)
+Base-LM NIAH, depth-0 = far-start needle (the hardest position; the thing that was failing).
+
+### depth-0 by θ and context length
+| θ (rotary-base) | 64K depth-0 | 128K depth-0 |
+|---|---|---|
+| 2M / 5M (original) | 0–30% | **0%** |
+| 8M | **100%** (all depths) | **0%** |
+| **16M** | **100%** | **90%** (9/10), 128K overall 93% |
+| 32M | 100% (eval in progress) | pending |
+
+**Raising θ moved 128K depth-0 from 0% → 90%.** Short context (4K/16K) stayed 100%. This
+confirms the diagnosis: depth-0 is a **θ / high-dim-OOD** problem, **not data** — two
+length-biased datasets (Jouni ≥64K, ours ≥128K) all gave depth-0 ~0%; θ alone fixed it.
+
+### The key relationship: critical θ scales with context length (≈ doubles per octave)
+| context | θ that fixes depth-0 |
+|---|---|
+| 64K | 8M |
+| 128K | 16M |
+| **256K** | **~32M** (extrapolated) |
+| (512K | ~64M) |
+
+8M brings the high RoPE dims in-distribution to ~64K; 16M to ~128K. The required θ roughly
+**doubles each time the context doubles** — consistent with NTK/critical-dimension theory, and
+these are *measured* needed values (not the naive formula, which under-scales — the LongRoPE2
+point).
+
+## θ values for 256K
+**Best estimate: θ ≈ 32M** for a 256K target, from the doubling relationship. De-risking:
+the **32M checkpoint already exists** (sweep arm, trained at 128K) — if it holds 4K/16K/64K at
+100% with no short-context regression, 32M is validated as safe before any 256K run.
+
+**Clean θ schedule (matched to length):** `64K@8M → 128K@16M → 256K@32M`.
+
+**To finalize 256K θ:** repeat the cheap sweep at 256K — short arms at **24M / 32M / 48M** from
+the 128K@16M checkpoint, eval depth-0 on the staged 256K data (Birger's HF natural/structured
+128K–256K sets + Jouni `sample_idx` ≥262144). Pick by depth-0 NIAH / needle-PPL.
+**Caveat:** watch short-context retention — very high θ can erode 4K/16K (literature); if 32M
+shows any short-ctx cost, use LongRoPE2-style searched per-dim scaling instead of uniform θ.
+
+## Production
+`real_v3_128k.sbatch` — full 2B-token 128K stage at **θ=16M** from the v2 64K ckpt (the
+validated production value). Saves every 100 iters.
