@@ -94,3 +94,49 @@ dense goes and provides a reference for the sparse work.
 Super-long is **θ-predicted and data-ready**, but it's an **infrastructure + architecture**
 project, not a data one. Sequence: fix 256K → build a ≥256K eval → 512K (the real next
 deliverable) → 1M (stretch) → 2M (proof-of-concept) → sparse-attention track for practical 1M+.
+
+---
+
+## Compute estimates (anchored to measured LUMI throughput)
+Measured: 64K = 66 s/iter, 128K = 259 s/iter at 16 nodes; going 64K→128K ~halved tok/s while
+seq doubled ⇒ **attention-dominated, cost/token ≈ ∝ sequence length**. Per-GCD ≈ 253 tok/s/GPU
+at 128K ⇒ **~1.1e-6 GPU-h/token × (S/128K)**.
+
+| stage | θ | CP / nodes-per-seq | GPU-h (0.3B tok) | wall* | nodes |
+|---|---|---|---|---|---|
+| 512K | 64M | 32 / 4 | ~1,300 | ~5 h | 32 |
+| 1M | 128M | 64 / 8 | ~2,600 | ~5 h | 64 |
+| 2M | 256M | 128 / 16 | ~5,300 | ~5 h | 128 |
+
+\*Wall-time stays ~flat because GPU-h *and* GPU-count both scale ∝ S — you pay in **GPUs**, not
+hours. Full dense super-long sweep ≈ **~9–10k GPU-h**. Reference: v3 (128K, 2B) ≈ 2,200 GPU-h;
+256K finishing stage ≈ 600–800; each NIAH eval ≈ 10–50 (1 GPU). **Budget (~1.4M GPU-h) is not
+the constraint** — wall-clock, getting 128 nodes for 2M, and CP=128 working are.
+
+## Sparse attention for the baby model (Qwen3 9B dense) — three paths
+Dense ABF+CP is the *baseline*; sparse attention is the *practical* route to 1M–2M.
+
+**1. Inference-time sparse — no retraining (do first).** Long-context attention is already
+sparse; exploit it on the existing dense checkpoint: **MInference** (sparse prefill, ~lossless,
+big speedup), SnapKV/H2O/Quest (KV eviction). Apply to `oellm-9b-128k-theta32m-v3` to serve 128K
+cheaply. Limit: serves a dense model, doesn't extend *trainable* length.
+
+**2. Hybrid sliding-window + global via continued pretraining — the practical 1M–2M path
+(RECOMMENDED).** Most layers → sliding-window (e.g. 8K); a few layers stay full-attention +
+attention sinks. Continue-train from the 128K θ=32M ckpt to adapt; **`synthetic_recall` data is
+essential** so the global layers learn to carry long-range info. Attention becomes **O(n·w) ≈
+linear** ⇒ 1M/2M tractable *without* CP=128. (How Gemma-2 / Cohere / Character.AI do long ctx.)
+**Megatron support:** `--window-size 8192,0` + `--window-attn-skip-freq 4` (3 SWA layers : 1 full;
+9 of 36 stay global). **Validation experiment running:** `swa_128k.sbatch` retrofits SWA at 128K
+and continue-trains, then we eval NIAH @128K — if depth-0 stays ≈100%, SWA preserves retrieval
+and we scale the hybrid to 512K/1M/2M.
+
+**3. Native/learned sparse attention (DSA) — SOTA, research track.** DeepSeek-style learned
+sparse (lightweight indexer selects tokens per query). Best quality-at-length; adds a module +
+substantial training. The production path for 1M+, as a separate project.
+
+### Recommended order
+(a) MInference on v3 (free, immediate) → (b) validate hybrid-SWA @128K (running) → (c) if it
+preserves retrieval, scale **hybrid-SWA to 512K/1M/2M** as the main super-long path (cheaper and
+more robust than dense CP=128) → (d) DSA as the long-term production research track. Dense ABF+CP
+512K stays as a clean baseline / θ-law validation.
