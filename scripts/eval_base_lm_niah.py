@@ -337,8 +337,9 @@ def run_trial(
     trial_idx: int,
     no_context: bool = False,
     shuffle_bindings: bool = False,
+    n_candidates: int = 4,
 ) -> dict:
-    rng_keys = random.sample(KEYS, 4)  # query + 3 distractors
+    rng_keys = random.sample(KEYS, n_candidates)  # query + (n_candidates-1) distractors
     query_key = rng_keys[0]
     query_value = rand_value()
     distractor_kvs = [(k, rand_value()) for k in rng_keys[1:]]
@@ -363,10 +364,10 @@ def run_trial(
         # After rotation in build_context, query_key maps to filler_kvs[0][1].
         # Distractors must NOT include filler_kvs[0][1] to avoid duplicates.
         true_candidate = filler_kvs[0][1]
-        distractors = [query_value] + [v for _, v in filler_kvs[1:3]]
+        distractors = [query_value] + [v for _, v in filler_kvs[1:n_candidates - 1]]
     else:
         true_candidate = query_value
-        distractors = [v for _, v in distractor_kvs[:3]]
+        distractors = [v for _, v in distractor_kvs[:n_candidates - 1]]
 
     candidates = [true_candidate] + distractors
     random.shuffle(candidates)
@@ -406,6 +407,8 @@ def main():
     ap.add_argument("--depths", nargs="+", type=float,
                     default=[0.0, 0.25, 0.5, 0.75, 1.0])
     ap.add_argument("--trials", type=int, default=10)
+    ap.add_argument("--n-candidates", type=int, default=4,
+                    help="forced-choice options (real in-context needles); higher = harder, chance=1/n")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -451,9 +454,10 @@ def main():
                 cell_correct = 0
                 for t in range(args.trials):
                     r = run_trial(model, tokenizer, device, tmpl,
-                                  ctx_len, depth, t)
+                                  ctx_len, depth, t, n_candidates=args.n_candidates)
                     r["lang"] = lang
                     r["condition"] = "main"
+                    r["n_candidates"] = args.n_candidates
                     append(r)
                     cell_correct += r["correct"]
                 acc = cell_correct / args.trials
