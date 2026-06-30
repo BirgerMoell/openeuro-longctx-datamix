@@ -314,14 +314,12 @@ def score_completion(model, tokenizer, prefix: str, candidate: str, device) -> f
         return float("-inf")
 
     with torch.no_grad():
-        out = model(**enc_full)
+        # logits_to_keep=k makes the model compute logits ONLY for the last k positions,
+        # avoiding a full-seq [L, V] logits tensor (131072*262144*2B ≈ 64 GB → OOM) at 128K+.
+        out = model(**enc_full, logits_to_keep=len(ids) + 1)
 
-    # Only pull the rows we need before log_softmax.
-    # Full logits [L, V] at 32K context + vocab 262144 ≈ 17 GB — OOM.
-    # Completion token j is predicted by logit at position pre_len-1+j.
-    positions = torch.arange(pre_len - 1, pre_len - 1 + len(ids), device=device)
-    logits_needed = out.logits[0][positions]          # [num_completion_tokens, V]
-    lp = F.log_softmax(logits_needed, dim=-1)         # safe: ~4 MB not 17 GB
+    # out.logits is [1, len(ids)+1, V]; rows 0..len(ids)-1 predict ids[0..len(ids)-1].
+    lp = F.log_softmax(out.logits[0].float(), dim=-1)
     return sum(lp[j, ids[j]].item() for j in range(len(ids)))
 
 
