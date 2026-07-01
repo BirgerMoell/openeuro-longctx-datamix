@@ -58,10 +58,32 @@ expects `hidden_size` input = the hidden states).
   (KL via `compute_dsa_indexer_loss`, stop-grad already built in). Gate: top-k recall ≥ ~0.9.
 - **Sparse adaptation:** `use_sparse_loss=True`, train end-to-end with top-k. k=1024→2048 by length.
 
-## Status / next action
-- **Setup mapped & documented (this doc).** The single new piece of code is
-  `GQADSASelfAttention` (thread hidden_states→x,qr) + the non-MLA spec; the rest is Megatron's
-  existing DSA + config flags.
-- **Next:** implement `GQADSASelfAttention` + spec (modular, in a patch dir), run the dev-g GPU
-  smoke test, iterate on ROCm issues, then a 128K dense-warmup on the real checkpoint.
-- Prototype + math reference: `scripts/dsa/`. Research plan: `docs/dsa_sparse_attention_plan.md`.
+## Status: ✅ DSA RUNS ON THE GPU (MI250X) for our GQA model
+GPU smoke test **PASSED** (`scripts/dsa/smoke_dsa_gpu.py`, dev-g, TP=1): builds the GQA-DSA
+`SelfAttention` (core=`GQADSAttention`), forward → `out (128,1,512) bf16`, backward → grad flows.
+Adapter: `scripts/dsa/megatron_gqa_dsa.py` (`GQADSAttention` drop-in + `get_gqa_dsa_attention_spec`).
+
+**Blockers cleared (7 dev-g iterations), each a small bridge — no fork of Megatron core:**
+1. `position_embedding_type`, `q_lora_rank`, `rotary_base` — not on base `TransformerConfig`;
+   `setattr` the MLA/rope fields the indexer reads (`q_lora_rank=None`, `qk_pos_emb_head_dim`,
+   `rope_type='rope'`, `rotary_percent`, `rotary_base`).
+2. Backend: use **`TESpecProvider`** (has `.linear`), not `LocalSpecProvider`.
+3. `fast_hadamard_transform` missing on ROCm → monkey-patch `dsa.rotate_activation` with a
+   **pure-torch normalized FWHT** (index_head_dim=64 is a power of 2).
+4. **GQA KV expansion**: the DSA core assumes equal q/kv head counts; `GQADSAttention.forward`
+   `repeat_interleave`s key/value from `ng`→`np` (as `DotProductAttention` does).
+
+**Prior work found (reuse for the FAST path):**
+`/scratch/.../users/bmoell/pylibs-overlay-euroeval-polluted/cudnn/deepseek_sparse_attention/`
+(`indexer_forward`, `indexer_backward`, `indexer_top_k`, `DSANamespace`) — compiled DSA kernels
+(built Jun 23) + sibling `native_sparse_attention`. Use these to replace the unfused reference
+`unfused_dsa_fn` for real long-context speedup.
+
+**Next:**
+1. **TP>1 for production:** the smoke reconstructs the indexer's `x` from the query (valid TP=1).
+   For TP=8, thread the real `hidden_states` (full `hidden_size`) into `core_attention` — a thin
+   custom `SelfAttention` (route 1). Then a tiny 2-layer end-to-end training step.
+2. **Correctness gate:** at `dsa_indexer_topk >= seqlen`, DSA output must ≈ dense (add to smoke).
+3. **Dense-warmup** on a real 128K checkpoint (`use_sparse_loss=False`, indexer KL), gate top-k
+   recall ≥ 0.9; then **sparse adaptation** (`use_sparse_loss=True`) with the fused kernels.
+- Prototype + math: `scripts/dsa/`. Research plan: `docs/dsa_sparse_attention_plan.md`.

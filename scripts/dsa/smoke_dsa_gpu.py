@@ -14,24 +14,36 @@ def main():
     from megatron.core.transformer.spec_utils import build_module
     sys.path.insert(0, os.path.dirname(__file__))
     from megatron_gqa_dsa import get_gqa_dsa_attention_spec
+    # ROCm lacks fast_hadamard_transform; replace the indexer's Hadamard rotation with a
+    # pure-torch normalized FWHT (faithful, dim must be power of 2 — index_head_dim=64 ✓).
+    import megatron.core.transformer.experimental_attention_variant.dsa as _dsa
+    def _fwht_rotate(x):
+        d = x.shape[-1]; shp = x.shape
+        y = x.reshape(-1, d).float(); h = 1
+        while h < d:
+            y = y.view(-1, d // (2 * h), 2, h)
+            top = y[:, :, 0] + y[:, :, 1]; bot = y[:, :, 0] - y[:, :, 1]
+            y = torch.stack([top, bot], dim=2).reshape(-1, d); h *= 2
+        return (y * (d ** -0.5)).reshape(shp).to(x.dtype)
+    _dsa.rotate_activation = _fwht_rotate
 
     H, NH, NKV, HD = 512, 8, 2, 64
     cfg = TransformerConfig(
         num_layers=1, hidden_size=H, num_attention_heads=NH, num_query_groups=NKV,
         kv_channels=HD, use_cpu_initialization=True, bf16=True,
         add_bias_linear=False, qk_layernorm=True, normalization="RMSNorm",
-        position_embedding_type="rope", rotary_base=32000000,
-        # DSA config:
+        # DSA config (these ARE TransformerConfig fields):
         dsa_indexer_n_heads=2, dsa_indexer_head_dim=64, dsa_indexer_topk=32,
         dsa_indexer_loss_coeff=0.1, dsa_indexer_use_sparse_loss=False,
-        q_lora_rank=None, rope_type="rope",
     )
-    # backend provider (local impl, per the DSA spec comment)
-    try:
-        from megatron.core.models.backends import LocalSpecProvider as Backend
-    except Exception:
-        from megatron.core.models.gpt.gpt_layer_specs import LocalSpecProvider as Backend  # fallback
-    backend = Backend()
+    # The DSA indexer reads MLA/rope config fields base TransformerConfig lacks; bridge them.
+    for k, v in dict(q_lora_rank=None, qk_pos_emb_head_dim=HD, rope_type="rope",
+                     rotary_percent=1.0, rotary_base=32000000).items():
+        setattr(cfg, k, v)
+    # backend: TESpecProvider supplies the linear/layernorm builders (has .linear);
+    # DSAttention itself is the local sparse module. (LocalSpecProvider lacks .linear.)
+    from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
+    backend = TESpecProvider()
     spec = get_gqa_dsa_attention_spec(cfg, backend)
     attn = build_module(spec, config=cfg, layer_number=1).cuda().bfloat16()
     print("built GQA-DSA attention:", type(attn).__name__, "core=", type(attn.core_attention).__name__)

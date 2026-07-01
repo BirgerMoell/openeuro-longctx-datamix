@@ -29,6 +29,13 @@ class GQADSAttention(DSAttention):
 
     def forward(self, query, key, value, attention_mask, attn_mask_type=None,
                 attention_bias=None, packed_seq_params=None):
+        # GQA: expand KV heads to match query heads (the DSA core assumes equal head counts,
+        # like DotProductAttention's repeat_interleave before scoring).
+        ng = key.shape[2]
+        np = query.shape[2]
+        if np // ng > 1:
+            key = key.repeat_interleave(np // ng, dim=2)
+            value = value.repeat_interleave(np // ng, dim=2)
         sq, b, np, hn = query.shape
         x = query.reshape(sq, b, np * hn)          # [sq, b, hidden] — indexer uses q_lora_rank=None=hidden
         qr = x
