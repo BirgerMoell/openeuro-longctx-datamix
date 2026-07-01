@@ -73,3 +73,4 @@ oldest quarter.
 
 **v2 success metric = lifting depth-0 (0%) and depth-0.25 (30%)** via the length-biased data
 (Jouni's tiered sample) + bigger 128K budget. Back-half is already saturated.
+prelude-128k final: 96% (864/900), depth-0 97%, depth-0.5 88% (lost-in-middle); vs v3 ~100%

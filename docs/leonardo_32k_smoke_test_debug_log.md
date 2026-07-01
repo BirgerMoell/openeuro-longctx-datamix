@@ -8,7 +8,7 @@
 
 ## Architecture
 
-9B model, TP=2, PP=2, 4 GPUs, GBS=4, MBS=1:
+9B model, verified on 2 Leonardo nodes with TP=4, PP=1, DP=2, sequence parallel, GBS=2, MBS=1:
 
 | Parameter | Value |
 |-----------|-------|
@@ -135,7 +135,7 @@ The observed ~60 GB is ~3 GB over theoretical — likely cuBLAS workspace and fr
 TP=4, PP=1, DP=2
 --sequence-parallel
 --use-distributed-optimizer
---recompute-granularity full --recompute-method uniform --recompute-num-layers 32
+--recompute-granularity full --recompute-method uniform --recompute-num-layers 16
 GBS=2, MBS=1, seq_len=32768
 Peak memory: 55.4 GB / 63.4 GB
 Throughput: ~105 TFLOP/s/GPU (iterations 2–10)
