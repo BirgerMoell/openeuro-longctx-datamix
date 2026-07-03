@@ -64,6 +64,23 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
         vp_stage=vp_stage, pg_collection=pg_collection,
     )
 
+    # Load the BASE weights ourselves, EXCLUDING the indexer keys, so the checkpoint key-set matches
+    # exactly (the indexer is new). This avoids Megatron's FullyParallelLoadStrategyWrapper planner,
+    # whose cross-rank gather_object deadlocks on the extra indexer keys. Pass Megatron NO --load;
+    # point DSA_LOAD_BASE at the iter dir (e.g. .../ckpt_262144/iter_0000059).
+    load_base = os.environ.get("DSA_LOAD_BASE", "")
+    if load_base:
+        from megatron.core import dist_checkpointing
+        from megatron.core.dist_checkpointing.serialization import get_default_load_sharded_strategy
+        ssd = model.sharded_state_dict()
+        ssd_base = {k: v for k, v in ssd.items() if "indexer" not in k}
+        strat = get_default_load_sharded_strategy(load_base)
+        state = dist_checkpointing.load(ssd_base, load_base, strat)
+        res = model.load_state_dict(state, strict=False)
+        miss = [k for k in getattr(res, "missing_keys", []) if "indexer" not in k]
+        print_rank_0(f"DSA base-load from {load_base}: {len(state)} tensors; indexer at init; "
+                     f"non-indexer missing: {len(miss)}")
+
     # Dense-warmup: freeze everything except the indexer (keep the 256K model exactly intact)
     if os.environ.get("DSA_FREEZE_MODEL", "0") == "1":
         fz = tr = 0
