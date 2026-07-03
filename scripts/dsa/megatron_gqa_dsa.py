@@ -25,25 +25,39 @@ from megatron.core.transformer.experimental_attention_variant.dsa import (
 
 
 class GQADSAttention(DSAttention):
-    """Drop-in DSA core_attention for GQA: derive the indexer inputs (x, qr) from the query."""
+    """Drop-in DSA core_attention for GQA. The indexer needs a full-hidden_size per-token rep (x/qr).
+    Production (TP>1): `GQADSASelfAttention` stashes the real hidden_states on `self._dsa_hidden`
+    (the indexer SP-gathers it). Fallback (TP=1): reconstruct x from the query (np*hn == hidden)."""
 
     def forward(self, query, key, value, attention_mask, attn_mask_type=None,
                 attention_bias=None, packed_seq_params=None):
-        # GQA: expand KV heads to match query heads (the DSA core assumes equal head counts,
-        # like DotProductAttention's repeat_interleave before scoring).
+        # GQA: expand KV heads to match query heads (like DotProductAttention's repeat_interleave).
         ng = key.shape[2]
         np = query.shape[2]
         if np // ng > 1:
             key = key.repeat_interleave(np // ng, dim=2)
             value = value.repeat_interleave(np // ng, dim=2)
         sq, b, np, hn = query.shape
-        x = query.reshape(sq, b, np * hn)          # [sq, b, hidden] — indexer uses q_lora_rank=None=hidden
+        x = getattr(self, "_dsa_hidden", None)     # real hidden_states threaded by GQADSASelfAttention
+        if x is None:
+            x = query.reshape(sq, b, np * hn)      # TP=1 fallback: np*hn == hidden_size
         qr = x
         return super().forward(
             query, key, value, attention_mask, x, qr,
             attn_mask_type=attn_mask_type, attention_bias=attention_bias,
             packed_seq_params=packed_seq_params,
         )
+
+
+class GQADSASelfAttention(SelfAttention):
+    """SelfAttention that threads the real hidden_states to the DSA core (needed for TP>1, where the
+    query is head-sharded and can't be reshaped to hidden_size)."""
+
+    def forward(self, hidden_states, *args, **kwargs):
+        # Stash the pre-projection hidden_states (full hidden_size, SP-sharded) on the core module;
+        # the DSA indexer gathers it across sequence-parallel internally.
+        self.core_attention._dsa_hidden = hidden_states
+        return super().forward(hidden_states, *args, **kwargs)
 
 
 def get_gqa_dsa_attention_spec(config, backend):
@@ -104,5 +118,6 @@ def get_gqa_dsa_layer_spec(backend, qk_layernorm=True):
         get_gpt_layer_with_transformer_engine_spec,
     )
     spec = get_gpt_layer_with_transformer_engine_spec(qk_layernorm=qk_layernorm)
+    spec.submodules.self_attention.module = GQADSASelfAttention  # threads hidden_states (TP>1)
     spec.submodules.self_attention.submodules.core_attention = _dsa_core_attention_spec(backend)
     return spec

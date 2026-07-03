@@ -7,9 +7,14 @@ def main():
     import torch.distributed as dist
     for k, v in dict(MASTER_ADDR="localhost", MASTER_PORT="29593", RANK="0", WORLD_SIZE="1", LOCAL_RANK="0").items():
         os.environ.setdefault(k, v)
-    dist.init_process_group(backend="nccl"); torch.cuda.set_device(0)
+    TP = int(os.environ.get("DSA_TP", "1"))
+    local = int(os.environ.get("LOCAL_RANK", "0"))
+    dist.init_process_group(backend="nccl"); torch.cuda.set_device(local)
     from megatron.core import parallel_state as ps
-    ps.initialize_model_parallel(tensor_model_parallel_size=1)
+    ps.initialize_model_parallel(tensor_model_parallel_size=TP)
+    from megatron.core.tensor_parallel import model_parallel_cuda_manual_seed
+    model_parallel_cuda_manual_seed(123)  # required for TP>1 (model-parallel-rng)
+    if dist.get_rank() == 0: print(f"TP={TP} world={dist.get_world_size()}")
     from megatron.core.transformer.transformer_config import TransformerConfig
     from megatron.core.models.gpt import GPTModel
     sys.path.insert(0, os.path.dirname(__file__))
@@ -29,6 +34,7 @@ def main():
         num_layers=2, hidden_size=H, num_attention_heads=NH, num_query_groups=NKV,
         kv_channels=HD, use_cpu_initialization=True, bf16=True, add_bias_linear=False,
         qk_layernorm=True, normalization="RMSNorm", gated_linear_unit=True, ffn_hidden_size=1024,
+        tensor_model_parallel_size=TP, sequence_parallel=(TP > 1),
         dsa_indexer_n_heads=2, dsa_indexer_head_dim=64, dsa_indexer_topk=32,
         dsa_indexer_loss_coeff=0.1, dsa_indexer_use_sparse_loss=False,
     )
