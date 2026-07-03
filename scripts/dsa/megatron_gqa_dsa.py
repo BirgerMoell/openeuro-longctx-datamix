@@ -76,3 +76,33 @@ def get_gqa_dsa_attention_spec(config, backend):
             k_layernorm=backend.layer_norm(for_qk=True) if config.qk_layernorm else None,
         ),
     )
+
+
+def _dsa_core_attention_spec(backend):
+    from megatron.core.transformer.spec_utils import ModuleSpec as _MS
+    return _MS(
+        module=GQADSAttention,
+        submodules=DSAttentionSubmodules(
+            indexer=_MS(
+                module=DSAIndexer,
+                submodules=DSAIndexerSubmodules(
+                    linear_wq_b=backend.linear(),
+                    linear_wk=backend.linear(),
+                    k_norm=backend.layer_norm(rms_norm=False, for_qk=True),
+                    linear_weights_proj=backend.linear(),
+                ),
+            )
+        ),
+    )
+
+
+def get_gqa_dsa_layer_spec(backend, qk_layernorm=True):
+    """Full GPT transformer-layer spec with DSA sparse attention: take the standard GQA layer and
+    swap ONLY its dense core_attention for our DSA core. Everything else (qkv, MLP, norms, BDA)
+    unchanged. Usable via `--spec <module> get_gqa_dsa_layer_spec`."""
+    from megatron.core.models.gpt.gpt_layer_specs import (
+        get_gpt_layer_with_transformer_engine_spec,
+    )
+    spec = get_gpt_layer_with_transformer_engine_spec(qk_layernorm=qk_layernorm)
+    spec.submodules.self_attention.submodules.core_attention = _dsa_core_attention_spec(backend)
+    return spec
