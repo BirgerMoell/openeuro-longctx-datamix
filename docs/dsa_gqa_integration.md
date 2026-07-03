@@ -79,11 +79,19 @@ Adapter: `scripts/dsa/megatron_gqa_dsa.py` (`GQADSAttention` drop-in + `get_gqa_
 (built Jun 23) + sibling `native_sparse_attention`. Use these to replace the unfused reference
 `unfused_dsa_fn` for real long-context speedup.
 
-**Next:**
-1. **TP>1 for production:** the smoke reconstructs the indexer's `x` from the query (valid TP=1).
-   For TP=8, thread the real `hidden_states` (full `hidden_size`) into `core_attention` — a thin
-   custom `SelfAttention` (route 1). Then a tiny 2-layer end-to-end training step.
-2. **Correctness gate:** at `dsa_indexer_topk >= seqlen`, DSA output must ≈ dense (add to smoke).
-3. **Dense-warmup** on a real 128K checkpoint (`use_sparse_loss=False`, indexer KL), gate top-k
-   recall ≥ 0.9; then **sparse adaptation** (`use_sparse_loss=True`) with the fused kernels.
+## Milestone ladder (to sparse 1M)
+1. ✅ **Attention module on GPU** (`smoke_dsa_gpu.py`) — fwd+bwd.
+2. ✅ **Full-model training step, TP=1** (`smoke_dsa_model.py`) — GPTModel with DSA layers, loss 8.4→5.4.
+   `get_gqa_dsa_layer_spec` swaps only the `core_attention` in the standard GQA layer (→ `--spec`-injectable).
+3. ✅ **TP>1** — `GQADSASelfAttention` threads real `hidden_states` to the indexer (query is head-sharded
+   at TP>1). TP=2 full-model train PASSED (loss 8.37→5.47, both ranks). RNG: needs
+   `model_parallel_cuda_manual_seed` at TP>1. Production parallelism (TP=8) validated in miniature.
+4. ⬜ **Correctness gate:** at `dsa_indexer_topk >= seqlen` DSA output ≈ dense.
+5. ⬜ **Dense-warmup on the real 256K ckpt** via `pretrain_gpt --spec scripts/dsa/megatron_gqa_dsa.py
+   get_gqa_dsa_layer_spec`: load 256K weights, indexer is new params, train indexer KL
+   (`use_sparse_loss=False`, stop-grad to model), gate top-k recall ≥ 0.9. Needs: pass the DSA config
+   bridge (`q_lora_rank=None`, `rope_type`, `qk_pos_emb_head_dim`, `dsa_*`) as args / a pretrain wrapper,
+   and the FWHT monkey-patch via the spec module import.
+6. ⬜ **Sparse adaptation** (`use_sparse_loss=True`) with the fused kernels
+   (`bmoell/.../deepseek_sparse_attention`, replacing `unfused_dsa_fn`), then **256K→512K→1M** under O(L·k).
 - Prototype + math: `scripts/dsa/`. Research plan: `docs/dsa_sparse_attention_plan.md`.
