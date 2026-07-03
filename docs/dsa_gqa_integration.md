@@ -95,3 +95,15 @@ Adapter: `scripts/dsa/megatron_gqa_dsa.py` (`GQADSAttention` drop-in + `get_gqa_
 6. ⬜ **Sparse adaptation** (`use_sparse_loss=True`) with the fused kernels
    (`bmoell/.../deepseek_sparse_attention`, replacing `unfused_dsa_fn`), then **256K→512K→1M** under O(L·k).
 - Prototype + math: `scripts/dsa/`. Research plan: `docs/dsa_sparse_attention_plan.md`.
+
+## Hybrid layer selection (from GLM-5, arXiv:2602.15763)
+**Don't make every layer sparse.** GLM-9B (closest to our size) uses a **1:1 full:sparse** ratio;
+the *arrangement* was **search-discovered at 16K** (`SFSSFFSSSFFFFSSFSFFFFFFSFSFSSFSSFSFSSFSSS`,
+S=sparse/SWA-4096, F=full) and **generalizes to all context lengths**. Implication for us:
+- Change `get_gqa_dsa_layer_spec` from all-layers-DSA to a **per-layer choice** (dense vs DSA),
+  driven by a pattern list. Keep ~half the layers full-attention.
+- **Search the pattern cheaply at short context (8–16K)** on our 9B (loss/NIAH), then reuse at
+  512K/1M (length-generalizes). Our model differs → our pattern will differ.
+- **Hyperparameters to adopt:** indexer **k=2048** (deterministic torch.topk); dense-warmup
+  **~1000 steps, LR ~5e-3** (indexer is small/new → high LR); sparse-adapt **~20B tokens**
+  (GLM: enough to match the dense baseline; DeepSeek-V3.2 used 943.7B — we need far less).
