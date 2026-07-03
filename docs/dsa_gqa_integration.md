@@ -107,3 +107,12 @@ S=sparse/SWA-4096, F=full) and **generalizes to all context lengths**. Implicati
 - **Hyperparameters to adopt:** indexer **k=2048** (deterministic torch.topk); dense-warmup
   **~1000 steps, LR ~5e-3** (indexer is small/new → high LR); sparse-adapt **~20B tokens**
   (GLM: enough to match the dense baseline; DeepSeek-V3.2 used 943.7B — we need far less).
+
+## Discovered hybrid pattern for OUR 9B (dsa_layer_search.py on prelude_256k_hf, 2K ctx)
+`FFFFSSFFFFFFFFSSFFFSSSSSSSSSSSSSSFFF` (18/36 sparse). Per-layer top-12% attention mass:
+early layers diffuse (L0=0.56 lowest → dense), **deep-middle L19–L32 most concentrated
+(0.90–0.97) → DSA**, last layers (L33–35) → dense. Interpretation: L0 broad context-gather;
+deep-middle = concentrated retrieval attention (sparsifiable); final layers refine. Model-specific
+(GLM's was scattered SFSSFF…; ours is a contiguous deep-middle block). **Use this pattern for the
+dense-warmup / sparse-adapt.** Re-run the search per θ-stage if desired (it length-generalizes, so
+once is likely enough).
