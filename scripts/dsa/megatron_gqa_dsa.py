@@ -121,3 +121,21 @@ def get_gqa_dsa_layer_spec(backend, qk_layernorm=True):
     spec.submodules.self_attention.module = GQADSASelfAttention  # threads hidden_states (TP>1)
     spec.submodules.self_attention.submodules.core_attention = _dsa_core_attention_spec(backend)
     return spec
+
+
+def get_gqa_dsa_block_spec(backend, pattern, qk_layernorm=True):
+    """HYBRID block: per-layer choice of dense vs DSA attention (GLM-5 uses ~1:1 full:sparse; the
+    arrangement is model-specific and search-discoverable at short context — see dsa_layer_search.py).
+    `pattern` is a string of len==num_layers: 'S'=sparse(DSA), 'F'=full(dense). Returns a
+    TransformerBlockSubmodules with the mixed per-layer specs."""
+    from megatron.core.transformer.transformer_block import TransformerBlockSubmodules
+    from megatron.core.extensions.transformer_engine import TENorm
+    from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_with_transformer_engine_spec
+    dense = get_gpt_layer_with_transformer_engine_spec(qk_layernorm=qk_layernorm)
+    layer_specs = []
+    for c in pattern:
+        if c in "Ss":
+            layer_specs.append(get_gqa_dsa_layer_spec(backend, qk_layernorm=qk_layernorm))
+        else:
+            layer_specs.append(dense)
+    return TransformerBlockSubmodules(layer_specs=layer_specs, layer_norm=TENorm)
