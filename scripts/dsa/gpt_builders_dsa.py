@@ -27,6 +27,12 @@ def _fwht(x):
     return (y * (d ** -0.5)).reshape(shp).to(x.dtype)
 _dsa.rotate_activation = _fwht
 
+# SPARSE RUN: enable Triton O(L·k) attention + chunked O(sq·k) indexer + KL-off (for >256K where
+# the dense attention/indexer O(L^2) OOM). Requires a warmed indexer (train with KL at <=256K first).
+if os.environ.get("DSA_SPARSE_RUN", "0") == "1":
+    from dsa_patches import apply_sparse_dsa_patches
+    apply_sparse_dsa_patches()
+
 DEFAULT_PATTERN = "FFFFSSFFFFFFFFSSFFFSSSSSSSSSSSSSSFFF"  # from dsa_layer_search on our 9B
 
 

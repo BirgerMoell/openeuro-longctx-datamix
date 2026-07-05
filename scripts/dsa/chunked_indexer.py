@@ -26,7 +26,7 @@ def chunked_topk(q, weights, k, topk, mask=None, block=32768):
         j1 = min(j0 + block, sk)
         s = index_scores_block(q, weights, k[j0:j1])          # [b,sq,blk]
         if mask is not None:
-            s = s + mask[:, :, j0:j1]
+            s = s + mask[..., j0:j1]                           # mask [sq,sk] or [b,sq,sk]; slice last dim
         idx = torch.arange(j0, j1, device=q.device).view(1, 1, -1).expand(b, sq, j1 - j0)
         if run_s is None:
             cs, ci = s, idx
