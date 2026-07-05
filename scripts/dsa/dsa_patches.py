@@ -56,3 +56,31 @@ def apply_sparse_dsa_patches():
     DSAIndexer.forward_with_scores = _chunked_forward_with_scores  # 2. chunked top-k
     _dsa.compute_dsa_indexer_loss = _noop_indexer_loss          # 3. KL off (warmup-only)
     print("[dsa_patches] SPARSE DSA enabled: Triton attn + chunked indexer + KL off")
+
+
+# ---- Indexer recall logging (the real warmup convergence signal) --------------------------------
+_recall_state = {"n": 0}
+
+def apply_indexer_recall_logging(every=40, k_eval=None):
+    """Wrap compute_dsa_indexer_loss to also print top-k RECALL = |indexer_topk ∩ attention_topk|/k
+    (rank0, periodically). Recall→1.0 means the indexer has learned to pick the tokens attention uses."""
+    import torch, torch.distributed as dist
+    orig = _dsa.compute_dsa_indexer_loss
+    def wrapped(index_scores, topk_indices, query, key, softmax_scale, *a, **kw):
+        st = _recall_state; st["n"] += 1
+        if st["n"] % every == 0 and (not dist.is_initialized() or dist.get_rank() == 0):
+            with torch.no_grad():
+                sq, b, np, hn = query.size(); sk = key.size(0)
+                q = query.permute(1, 2, 0, 3).reshape(b * np, sq, hn).float()
+                kk = key.permute(1, 2, 3, 0).reshape(b * np, hn, sk).float()
+                attn = torch.bmm(q, kk) * softmax_scale                       # [b*np, sq, sk]
+                cm = torch.triu(torch.full((sq, sk), float("-inf"), device=attn.device), 1)
+                attn = attn.reshape(b, np, sq, sk).mean(1) + cm                # [b,sq,sk] (head-avg)
+                kk_ = min(topk_indices.shape[-1], sk)
+                atk = attn.topk(kk_, dim=-1).indices                          # [b,sq,k]
+                itk = topk_indices[..., :kk_]
+                inter = (atk.unsqueeze(-1) == itk.unsqueeze(-2)).any(-1).float().mean().item()
+                print(f"[dsa recall] step~{st['n']//_recall_state.get('layers',1)} top-{kk_} recall={inter:.3f}", flush=True)
+        return orig(index_scores, topk_indices, query, key, softmax_scale, *a, **kw)
+    _dsa.compute_dsa_indexer_loss = wrapped
+    print("[dsa_patches] indexer recall logging on (every %d layer-calls)" % every)
