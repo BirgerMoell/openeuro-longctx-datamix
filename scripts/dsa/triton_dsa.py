@@ -69,7 +69,6 @@ def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=32, BLOC
     k = topk_indices.shape[-1]
     out = torch.empty(sq, b, np, hn, device=query.device, dtype=query.dtype)
     lse = torch.empty(b, np, sq, device=query.device, dtype=torch.float32)
-    grid = (triton.cdiv(sq, BLOCK_M), b * np)
     for bi in range(b):
         for hi in range(np):
             q = query[:, bi, hi]; kk = key[:, bi, hi]; vv = value[:, bi, hi]
@@ -84,4 +83,89 @@ def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=32, BLOC
                 o.stride(0), o.stride(1),
                 BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, HN=hn,
             )
-    return out.reshape(sq, b, np * hn), lse
+    return out, lse
+
+
+@triton.jit
+def _sparse_attn_bwd(
+    Q, K, V, TOPK, DO, Lse, DQ, DK, DV,
+    sq, skv, k, scale,
+    sq_q, sd_q, sk_k, sd_k, sk_v, sd_v, st_sq, st_k,
+    BLOCK_M: tl.constexpr, BLOCK_K: tl.constexpr, HN: tl.constexpr,
+):
+    pid_m = tl.program_id(0)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    m_mask = offs_m < sq
+    offs_d = tl.arange(0, HN)
+    q = tl.load(Q + offs_m[:, None] * sq_q + offs_d[None, :] * sd_q, mask=m_mask[:, None], other=0.0).to(tl.float32)
+    do = tl.load(DO + offs_m[:, None] * sq_q + offs_d[None, :] * sd_q, mask=m_mask[:, None], other=0.0).to(tl.float32)
+    lse = tl.load(Lse + offs_m, mask=m_mask, other=0.0)
+    # pass 1: delta_i = sum_j p_ij * dp_ij, from the kernel's own fp32 recompute (avoids bf16-O cancellation error)
+    delta = tl.zeros([BLOCK_M], tl.float32)
+    for j0 in range(0, k, BLOCK_K):
+        offs_k = j0 + tl.arange(0, BLOCK_K); k_mask = offs_k < k
+        idx = tl.load(TOPK + offs_m[:, None] * st_sq + offs_k[None, :] * st_k, mask=m_mask[:, None] & k_mask[None, :], other=0)
+        valid = m_mask[:, None] & k_mask[None, :] & (idx <= offs_m[:, None])
+        kb = tl.load(K + idx[:, :, None] * sk_k + offs_d[None, None, :] * sd_k, mask=valid[:, :, None], other=0.0).to(tl.float32)
+        vb = tl.load(V + idx[:, :, None] * sk_v + offs_d[None, None, :] * sd_v, mask=valid[:, :, None], other=0.0).to(tl.float32)
+        s = tl.sum(q[:, None, :] * kb, axis=2) * scale
+        p = tl.where(valid, tl.exp(s - lse[:, None]), 0.0)
+        delta += tl.sum(p * tl.sum(do[:, None, :] * vb, axis=2), axis=1)
+    dq = tl.zeros([BLOCK_M, HN], tl.float32)
+    for j0 in range(0, k, BLOCK_K):
+        offs_k = j0 + tl.arange(0, BLOCK_K)
+        k_mask = offs_k < k
+        idx = tl.load(TOPK + offs_m[:, None] * st_sq + offs_k[None, :] * st_k,
+                      mask=m_mask[:, None] & k_mask[None, :], other=0)
+        valid = m_mask[:, None] & k_mask[None, :] & (idx <= offs_m[:, None])
+        kblk = tl.load(K + idx[:, :, None] * sk_k + offs_d[None, None, :] * sd_k, mask=valid[:, :, None], other=0.0).to(tl.float32)
+        vblk = tl.load(V + idx[:, :, None] * sk_v + offs_d[None, None, :] * sd_v, mask=valid[:, :, None], other=0.0).to(tl.float32)
+        s = tl.sum(q[:, None, :] * kblk, axis=2) * scale
+        p = tl.where(valid, tl.exp(s - lse[:, None]), 0.0)          # [M,K]
+        dp = tl.sum(do[:, None, :] * vblk, axis=2)                  # [M,K]
+        ds = p * (dp - delta[:, None]) * scale                     # [M,K]
+        dq += tl.sum(ds[:, :, None] * kblk, axis=1)
+        tl.atomic_add(DV + idx[:, :, None] * sk_v + offs_d[None, None, :] * sd_v,
+                      p[:, :, None] * do[:, None, :], mask=valid[:, :, None])
+        tl.atomic_add(DK + idx[:, :, None] * sk_k + offs_d[None, None, :] * sd_k,
+                      ds[:, :, None] * q[:, None, :], mask=valid[:, :, None])
+    tl.store(DQ + offs_m[:, None] * sq_q + offs_d[None, :] * sd_q, dq.to(DQ.dtype.element_ty), mask=m_mask[:, None])
+
+
+class _SparseDSA(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K):
+        out, lse = sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K)
+        ctx.save_for_backward(query, key, value, topk_indices, out, lse)
+        ctx.scale = scale; ctx.blocks = (BLOCK_M, BLOCK_K)
+        sq, b, np, hn = query.shape
+        return out.reshape(sq, b, np * hn)
+
+    @staticmethod
+    def backward(ctx, dout):
+        query, key, value, topk_indices, out, lse = ctx.saved_tensors
+        sq, b, np, hn = query.shape
+        skv = key.shape[0]; k = topk_indices.shape[-1]
+        BLOCK_M, BLOCK_K = ctx.blocks; scale = ctx.scale
+        dout = dout.reshape(sq, b, np, hn)
+        dq = torch.empty_like(query)
+        dk = torch.zeros(skv, b, np, hn, device=key.device, dtype=torch.float32)
+        dv = torch.zeros(skv, b, np, hn, device=value.device, dtype=torch.float32)
+        for bi in range(b):
+            for hi in range(np):
+                qs, ks, vs = query[:, bi, hi], key[:, bi, hi], value[:, bi, hi]
+                dos, dqs, dks, dvs = dout[:, bi, hi], dq[:, bi, hi], dk[:, bi, hi], dv[:, bi, hi]
+                ti = topk_indices[bi]
+                _sparse_attn_bwd[(triton.cdiv(sq, BLOCK_M),)](
+                    qs, ks, vs, ti, dos, lse[bi, hi], dqs, dks, dvs,
+                    sq, skv, k, scale,
+                    qs.stride(0), qs.stride(1), ks.stride(0), ks.stride(1),
+                    vs.stride(0), vs.stride(1), ti.stride(0), ti.stride(1),
+                    BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, HN=hn,
+                )
+        return dq, dk.to(key.dtype), dv.to(value.dtype), None, None, None, None
+
+
+def triton_dsa_attn(query, key, value, topk_indices, scale, BLOCK_M=32, BLOCK_K=64):
+    """Drop-in for unfused_dsa_fn (differentiable). query[sq,b,np,hn] ... -> [sq,b,np*hn]."""
+    return _SparseDSA.apply(query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K)
