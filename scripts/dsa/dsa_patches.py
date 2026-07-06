@@ -69,7 +69,9 @@ def apply_indexer_recall_logging(every=40, k_eval=None):
     ke = k_eval or 2048
     def wrapped(index_scores, topk_indices, query, key, softmax_scale, *a, **kw):
         st = _recall_state; st["n"] += 1
-        if st["n"] % every == 0 and (not dist.is_initialized() or dist.get_rank() == 0) and index_scores is not None:
+        # compute on ALL ranks (identical counter -> stays in sync; rank-0-only work would desync
+        # the next collective and hang). Print only on rank 0.
+        if st["n"] % every == 0 and index_scores is not None:
             with torch.no_grad():
                 sq, b, np, hn = query.size(); sk = key.size(0)
                 q = query.permute(1, 2, 0, 3).reshape(b * np, sq, hn).float()
@@ -83,7 +85,8 @@ def apply_indexer_recall_logging(every=40, k_eval=None):
                 itk = (index_scores + cm.unsqueeze(0)).topk(kk_, dim=-1).indices
                 atk = attn.topk(kk_, dim=-1).indices
                 inter = (atk.unsqueeze(-1) == itk.unsqueeze(-2)).any(-1).float().mean().item()
-                print(f"[dsa recall] call~{st['n']} top-{kk_} recall={inter:.3f}", flush=True)
+                if not dist.is_initialized() or dist.get_rank() == 0:
+                    print(f"[dsa recall] call~{st['n']} top-{kk_} recall={inter:.3f}", flush=True)
         return orig(index_scores, topk_indices, query, key, softmax_scale, *a, **kw)
     _dsa.compute_dsa_indexer_loss = wrapped
     print("[dsa_patches] indexer recall logging on (every %d layer-calls)" % every)
