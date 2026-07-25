@@ -74,15 +74,19 @@ def apply_indexer_recall_logging(every=40, k_eval=None):
         if st["n"] % every == 0 and index_scores is not None:
             with torch.no_grad():
                 sq, b, np, hn = query.size(); sk = key.size(0)
-                q = query.permute(1, 2, 0, 3).reshape(b * np, sq, hn).float()
+                # SAMPLE a few query rows only -> attention is [b*np, Sq, sk], NOT [.., sq, sk]
+                # (the full matrix is O(L^2) = 64GB @16K -> OOM; sampling keeps this a cheap probe).
+                nq = min(64, sq)
+                qi = torch.linspace(sk // nq, sq - 1, nq, device=query.device).long()  # spread, causal-safe
+                qs = query[qi]                                                # [nq,b,np,hn]
+                q = qs.permute(1, 2, 0, 3).reshape(b * np, nq, hn).float()
                 kk = key.permute(1, 2, 3, 0).reshape(b * np, hn, sk).float()
-                attn = torch.bmm(q, kk) * softmax_scale
-                cm = torch.triu(torch.full((sq, sk), float("-inf"), device=attn.device), 1)
-                attn = attn.reshape(b, np, sq, sk).mean(1) + cm                # [b,sq,sk]
+                attn = torch.bmm(q, kk).reshape(b, np, nq, sk).mean(1) * softmax_scale  # [b,nq,sk]
+                cm = torch.where(torch.arange(sk, device=attn.device)[None, None, :] <= qi[None, :, None],
+                                 0.0, float("-inf"))                          # [1,nq,sk] causal
+                attn = attn + cm
                 kk_ = min(ke, sk)
-                # indexer's OWN top-kk_ (from its raw scores) vs attention's top-kk_ -- meaningful
-                # even while the attention itself is dense (top-k=full) during warm-up.
-                itk = (index_scores + cm.unsqueeze(0)).topk(kk_, dim=-1).indices
+                itk = (index_scores[:, qi] + cm).topk(kk_, dim=-1).indices     # indexer's top-k at sampled q
                 atk = attn.topk(kk_, dim=-1).indices
                 inter = (atk.unsqueeze(-1) == itk.unsqueeze(-2)).any(-1).float().mean().item()
                 if not dist.is_initialized() or dist.get_rank() == 0:
