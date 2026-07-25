@@ -22,3 +22,14 @@ attends to garbage tokens → noisy loss (1.4–2.5), grad norm ~5000. Fix = den
 ## Why warm short, run long
 The indexer learns "which tokens matter" — length-generalizes (like the θ-law). So warm at 16–32K
 (cheap, O(L²) fits), then INFERENCE/sparse-run at 512K–2M with the Triton O(L·k) kernel.
+
+## Update (2026-07-25): indexer LR is the key lever (from live recall + literature)
+Our first warm-up (LR 1e-4) had recall creep 0.37→0.40 over 46 iters — learning, but ~50× too slow.
+**DeepSeek/GLM train the indexer at ~5e-3** (vs model ~1e-5). During DENSE warm-up the model is
+unperturbed (attention is full), so a high global LR mostly drives the indexer. Fix: warm up at
+**LR 5e-3**. Literature cross-checks (all confirm dense-warmup-then-sparse):
+- **MoBA**: "indexer warmup runs full attention before switching to sparse → gives a stable target
+  to imitate; same recipe converts a pretrained dense checkpoint into a sparse one." (= our exact plan)
+- **InfLLM-V2** (dense-sparse switchable): sparse adaptation needs LITTLE data — cheap.
+- **Kimi Linear**: hybrid ratio matters (they use 3 linear : 1 full) — supports per-layer hybrid.
+- Refs: arXiv:2510.26692 (Kimi Linear), arXiv:2509.24663 (InfLLM-V2), MoonshotAI/MoBA.
