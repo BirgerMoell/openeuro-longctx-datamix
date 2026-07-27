@@ -32,6 +32,7 @@ Usage
 """
 
 import argparse
+import hashlib
 import json
 import random
 from collections import defaultdict
@@ -244,6 +245,19 @@ def rand_value() -> str:
     return str(random.randint(1_000_000, 9_999_999))
 
 
+def seed_case(base_seed: int, lang: str, condition: str, target_tokens: int,
+              depth: float, trial: int) -> None:
+    """Seed each case independently so resumed evaluations reproduce missing cases."""
+    payload = f"{base_seed}|{lang}|{condition}|{target_tokens}|{depth:.8f}|{trial}"
+    digest = hashlib.sha256(payload.encode("utf-8")).digest()
+    random.seed(int.from_bytes(digest[:8], "big"))
+
+
+def result_key(condition: str, target_tokens: int, depth: float, trial: int) -> tuple:
+    """Stable identity for one language-local evaluation case."""
+    return condition, int(target_tokens), round(float(depth), 8), int(trial)
+
+
 # ── Context builder ────────────────────────────────────────────────────────────
 
 def build_context(
@@ -408,6 +422,8 @@ def main():
     ap.add_argument("--n-candidates", type=int, default=4,
                     help="forced-choice options (real in-context needles); higher = harder, chance=1/n")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--resume", action="store_true",
+                    help="preserve completed JSONL cases and run only missing cases")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -435,28 +451,71 @@ def main():
             print(f"WARNING: no template for '{lang}', skipping", flush=True)
             continue
         tmpl = LANG_TEMPLATES[lang]
-        lang_results = []
-        lang_jsonl = open(out_dir / f"{lang}_results.jsonl", "w")
+        lang_path = out_dir / f"{lang}_results.jsonl"
+        completed = {}
+        if args.resume and lang_path.exists():
+            with open(lang_path) as existing_file:
+                for line_number, line in enumerate(existing_file, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                        key = result_key(
+                            row["condition"], row["target_tokens"], row["depth"], row["trial"]
+                        )
+                        completed[key] = row
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                        print(
+                            f"WARNING: ignoring invalid resume row {lang_path}:{line_number}: {exc}",
+                            flush=True,
+                        )
+            print(f"Resuming {lang}: {len(completed)} completed cases", flush=True)
+
+        lang_results = list(completed.values())
+        # Rewrite valid unique rows before appending, which also removes a truncated final row
+        # left by a Slurm timeout or node failure.
+        lang_jsonl = open(lang_path, "w")
+        for row in lang_results:
+            lang_jsonl.write(json.dumps(row, ensure_ascii=False) + "\n")
+        lang_jsonl.flush()
         print(f"\n{'═'*72}")
         print(f"Language: {lang.upper()}")
         print('═'*72, flush=True)
 
         def append(r):
             lang_results.append(r)
+            completed[result_key(r["condition"], r["target_tokens"], r["depth"], r["trial"])] = r
             lang_jsonl.write(json.dumps(r, ensure_ascii=False) + "\n")
             lang_jsonl.flush()
+
+        def run_or_resume(condition, target_tokens, depth, trial, **trial_kwargs):
+            key = result_key(condition, target_tokens, depth, trial)
+            if key in completed:
+                return completed[key]
+            seed_case(args.seed, lang, condition, target_tokens, depth, trial)
+            r = run_trial(
+                model,
+                tokenizer,
+                device,
+                tmpl,
+                target_tokens,
+                depth,
+                trial,
+                n_candidates=args.n_candidates,
+                **trial_kwargs,
+            )
+            r["lang"] = lang
+            r["condition"] = condition
+            r["n_candidates"] = args.n_candidates
+            append(r)
+            return r
 
         # ── Main grid: context length × depth ─────────────────────────────
         for ctx_len in args.context_lengths:
             for depth in args.depths:
                 cell_correct = 0
                 for t in range(args.trials):
-                    r = run_trial(model, tokenizer, device, tmpl,
-                                  ctx_len, depth, t, n_candidates=args.n_candidates)
-                    r["lang"] = lang
-                    r["condition"] = "main"
-                    r["n_candidates"] = args.n_candidates
-                    append(r)
+                    r = run_or_resume("main", ctx_len, depth, t)
                     cell_correct += r["correct"]
                 acc = cell_correct / args.trials
                 print(f"  ctx={ctx_len:6d}  depth={depth:.2f}  "
@@ -469,11 +528,7 @@ def main():
         # no_context (256 token target, any depth)
         nc_correct = 0
         for t in range(args.trials):
-            r = run_trial(model, tokenizer, device, tmpl, 256, 0.5, t,
-                          no_context=True)
-            r["lang"] = lang
-            r["condition"] = "no_context"
-            append(r)
+            r = run_or_resume("no_context", 256, 0.5, t, no_context=True)
             nc_correct += r["correct"]
         print(f"  no_context    acc={nc_correct/args.trials:.2f}  "
               f"({nc_correct}/{args.trials})", flush=True)
@@ -481,11 +536,7 @@ def main():
         # shuffled bindings (short context)
         sh_correct = 0
         for t in range(args.trials):
-            r = run_trial(model, tokenizer, device, tmpl, 2048, 0.5, t,
-                          shuffle_bindings=True)
-            r["lang"] = lang
-            r["condition"] = "shuffled"
-            append(r)
+            r = run_or_resume("shuffled", 2048, 0.5, t, shuffle_bindings=True)
             sh_correct += r["correct"]
         print(f"  shuffled      acc={sh_correct/args.trials:.2f}  "
               f"({sh_correct}/{args.trials})", flush=True)
@@ -493,10 +544,7 @@ def main():
         # short baseline (256 tokens, centre)
         sb_correct = 0
         for t in range(args.trials):
-            r = run_trial(model, tokenizer, device, tmpl, 256, 0.5, t)
-            r["lang"] = lang
-            r["condition"] = "short_ctx"
-            append(r)
+            r = run_or_resume("short_ctx", 256, 0.5, t)
             sb_correct += r["correct"]
         print(f"  short_ctx     acc={sb_correct/args.trials:.2f}  "
               f"({sb_correct}/{args.trials})", flush=True)

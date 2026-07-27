@@ -18,11 +18,21 @@ it (`oellm-9b-256k-theta64m-prelude`). Going further — 512K, 1M, 2M — the wa
 
 - **Dense prefill is O(L²).** At 512K a full attention-score matrix is ~1.1 TB (fp32); it OOMs on a
   single GCD past ~64K and is minutes-per-forward at 512K. That is not servable.
-- **DSA is O(L·k).** A lightweight "lightning indexer" scores past tokens and selects the top-k
+- **DSA core attention is O(L·k)** (the indexer is still O(L²) — see caveat below). A lightweight "lightning indexer" scores past tokens and selects the top-k
   (k≈2048); attention runs only over those. Prefill becomes ~250× cheaper at 512K, and — critically
   — the KV cache can be **offloaded** (keep bulk K/V in host memory, fetch only the ~2048 selected
   per query), turning GPU KV memory from O(L) to O(k). *That* is what makes 1M–2M servable on modest
   hardware.
+
+**⚠️ COMPLEXITY CAVEAT (corrected 2026-07-27).** Only the *core sparse attention* is O(L·k). The
+**lightning indexer still scores all past tokens → O(L²) compute** (our chunked indexer bounds peak
+*memory*, not compute). So the *system* is not O(L·k) end-to-end. Indexer and attention must be
+benchmarked **separately and together** at 128K/256K/512K before any 1M claim. Beyond ~512K the
+indexer likely needs hierarchical/block-level candidate selection to avoid dominating cost.
+
+**KV-CACHE CAVEAT.** DSA does not remove the KV cache: for this 36-layer / 8-KV-head / 128-dim bf16
+model it is ~**147 GB @1M, ~295 GB @2M**. Serving 1M–2M requires a *separate* KV deliverable (paged
+CPU/NVMe offload + sparse fetch and/or KV quantization), benchmarked for PCIe bandwidth and TTFT.
 
 **Key validation (this is the headline empirical result):** on our real 256K model the attention is
 **highly concentrated** — the top-2048 keys hold **86–97% of all attention mass** (measured at layers
@@ -104,10 +114,12 @@ keys — bypasses Megatron's `FullyParallelLoadStrategyWrapper` planner, whose c
 `DSA_N_HEADS`, `DSA_HEAD_DIM`, `DSA_LOSS_COEFF`, `DSA_SPARSE_RUN`, `DSA_LOAD_BASE`, `DSA_RECALL_LOG`.
 
 ### 3.5 Hybrid layer selection — `dsa_layer_search.py`
-Per GLM-5 (arXiv:2602.15763), **not every layer should be sparse** (they used ~1:1 full:sparse, an
-arrangement search-discovered at 16K that length-generalizes). Our search (one cheap 2K forward on
+**CORRECTION (2026-07-27):** GLM-5's 1:1 full:sparse pattern was for a **sliding-window-attention
+ablation, NOT DSA** — GLM-5 states DSA can be applied to **all** layers. Our 18-full/18-DSA layout
+still has 18 **O(L²) global** layers, so it **cannot serve 1–2M**. Primary design must be **all-layer
+DSA**; any non-DSA layer must be bounded **local/SWA**, never full global attention. Our search (one cheap 2K forward on
 `prelude_256k_hf`, ranking layers by top-12% attention concentration) yielded:
-`FFFFSSFFFFFFFFSSFFFSSSSSSSSSSSSSSFFF` (18/36 sparse) — **early layers (esp L0, most diffuse) and the
+`FFFFSSFFFFFFFFSSFFFSSSSSSSSSSSSSSFFF` (18/36 sparse) — **SUPERSEDED: use all-layer DSA (see correction above).** early layers (esp L0, most diffuse) and the
 last layers stay dense; the concentrated deep-middle (L19–32) goes sparse.** Model-specific and
 interpretable.
 

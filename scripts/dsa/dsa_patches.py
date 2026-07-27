@@ -62,8 +62,12 @@ def apply_sparse_dsa_patches():
 _recall_state = {"n": 0}
 
 def apply_indexer_recall_logging(every=40, k_eval=None):
-    """Wrap compute_dsa_indexer_loss to also print top-k RECALL = |indexer_topk ∩ attention_topk|/k
-    (rank0, periodically). Recall→1.0 means the indexer has learned to pick the tokens attention uses."""
+    """Log the dense-attention probability mass captured by the indexer's selected keys.
+
+    Set overlap is badly inflated on early causal rows where fewer than ``k`` keys are valid.
+    Attention-mass recall remains meaningful there and directly measures how much dense attention
+    the sparse selection would preserve. A value of 1.0 captures all target attention mass.
+    """
     import torch, torch.distributed as dist
     orig = _dsa.compute_dsa_indexer_loss
     ke = k_eval or 2048
@@ -81,16 +85,22 @@ def apply_indexer_recall_logging(every=40, k_eval=None):
                 qs = query[qi]                                                # [nq,b,np,hn]
                 q = qs.permute(1, 2, 0, 3).reshape(b * np, nq, hn).float()
                 kk = key.permute(1, 2, 3, 0).reshape(b * np, hn, sk).float()
-                attn = torch.bmm(q, kk).reshape(b, np, nq, sk).mean(1) * softmax_scale  # [b,nq,sk]
+                attn = torch.bmm(q, kk).reshape(b, np, nq, sk) * softmax_scale
                 cm = torch.where(torch.arange(sk, device=attn.device)[None, None, :] <= qi[None, :, None],
                                  0.0, float("-inf"))                          # [1,nq,sk] causal
-                attn = attn + cm
+                target = torch.softmax(attn + cm.unsqueeze(1), dim=-1).mean(dim=1)  # [b,nq,sk]
                 kk_ = min(ke, sk)
                 itk = (index_scores[:, qi] + cm).topk(kk_, dim=-1).indices     # indexer's top-k at sampled q
-                atk = attn.topk(kk_, dim=-1).indices
-                inter = (atk.unsqueeze(-1) == itk.unsqueeze(-2)).any(-1).float().mean().item()
+                captured = torch.gather(target, -1, itk).sum(dim=-1).mean()
+                if dist.is_initialized():
+                    dist.all_reduce(captured, op=dist.ReduceOp.AVG)
+                captured = captured.item()
                 if not dist.is_initialized() or dist.get_rank() == 0:
-                    print(f"[dsa recall] call~{st['n']} top-{kk_} recall={inter:.3f}", flush=True)
+                    print(
+                        f"[dsa recall] call~{st['n']} top-{kk_} "
+                        f"attention-mass-recall={captured:.3f}",
+                        flush=True,
+                    )
         return orig(index_scores, topk_indices, query, key, softmax_scale, *a, **kw)
     _dsa.compute_dsa_indexer_loss = wrapped
     print("[dsa_patches] indexer recall logging on (every %d layer-calls)" % every)
