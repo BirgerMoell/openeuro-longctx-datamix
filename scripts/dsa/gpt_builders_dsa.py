@@ -33,6 +33,11 @@ if os.environ.get("DSA_SPARSE_RUN", "0") == "1":
     from dsa_patches import apply_sparse_dsa_patches
     apply_sparse_dsa_patches()
 
+# Warm-up: log indexer top-k RECALL (the real convergence signal; lm loss is noisy at small batch)
+if os.environ.get("DSA_RECALL_LOG", "0") == "1":
+    from dsa_patches import apply_indexer_recall_logging
+    apply_indexer_recall_logging(every=int(os.environ.get("DSA_RECALL_EVERY", "90")))
+
 DEFAULT_PATTERN = "FFFFSSFFFFFFFFSSFFFSSSSSSSSSSSSSSFFF"  # from dsa_layer_search on our 9B
 
 
