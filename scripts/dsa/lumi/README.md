@@ -24,6 +24,7 @@ lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/
 |---|---|---|
 | `dsa_warmup_failclosed.sbatch` | Frozen-base, all-layer 8K indexer warm-up | Validated; job 20291047 completed 300 steps |
 | `dsa_sparse_8k_correctness.sbatch` | One-step sparse update with selected-set KL and dual-gradient probes | Validated recipe; source of job 20336946 |
+| `dsa_sparse_8k_sustained.sbatch` | Resumable 500-update sparse-adaptation gate from warm iteration 300 | Current next-stage launcher; checkpoints every 50 updates |
 | `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
 
 The current sparse path supports TP=8 but deliberately rejects CP>1. Do not start 512K–2M sparse
