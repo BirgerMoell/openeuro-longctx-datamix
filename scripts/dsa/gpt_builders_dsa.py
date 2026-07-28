@@ -5,7 +5,7 @@ It: (1) applies the ROCm FWHT patch, (2) bridges the DSA config fields onto the 
 (3) builds a per-layer dense/DSA block spec (all DSA by default; pattern from $DSA_PATTERN),
 (4) for dense-warmup ($DSA_FREEZE_MODEL=1) freezes everything except the indexer.
 
-Env knobs: DSA_PATTERN, DSA_TOPK (2048), DSA_N_HEADS (4), DSA_HEAD_DIM (128),
+Env knobs: DSA_PATTERN, DSA_TOPK (2048), DSA_N_HEADS (16), DSA_HEAD_DIM (128),
 DSA_LOSS_COEFF (0.1), DSA_SPARSE (0=warmup/dense,1=sparse), DSA_FREEZE_MODEL (1=indexer-only).
 """
 import os, sys, torch
@@ -27,16 +27,20 @@ def _fwht(x):
     return (y * (d ** -0.5)).reshape(shp).to(x.dtype)
 _dsa.rotate_activation = _fwht
 
-# SPARSE RUN: enable Triton O(L·k) attention + chunked O(sq·k) indexer + KL-off (for >256K where
-# the dense attention/indexer O(L^2) OOM). Requires a warmed indexer (train with KL at <=256K first).
+# SPARSE RUN: enable Triton O(L*k) attention, exact causal blocked index selection, and
+# selected-set KL. Selection is still O(L^2) arithmetic, so this is an 8K correctness bridge.
 if os.environ.get("DSA_SPARSE_RUN", "0") == "1":
+    if os.environ.get("DSA_SPARSE", "0") != "1":
+        raise RuntimeError("DSA_SPARSE_RUN=1 requires DSA_SPARSE=1 (selected-set KL)")
+    if os.environ.get("DSA_FREEZE_MODEL", "0") == "1":
+        raise RuntimeError("sparse adaptation must train the main model; set DSA_FREEZE_MODEL=0")
     from dsa_patches import apply_sparse_dsa_patches
     apply_sparse_dsa_patches()
 
 # Warm-up: log indexer top-k RECALL (the real convergence signal; lm loss is noisy at small batch)
 if os.environ.get("DSA_RECALL_LOG", "0") == "1":
     from dsa_patches import apply_indexer_recall_logging
-    apply_indexer_recall_logging(every=int(os.environ.get("DSA_RECALL_EVERY", "90")))
+    apply_indexer_recall_logging(every=int(os.environ.get("DSA_RECALL_EVERY", "36")))
 
 # Million-token scaling cannot retain global O(L²) layers. The earlier 18/18 search pattern is
 # useful only as a diagnostic; production DSA defaults to every layer sparse-capable.
@@ -51,19 +55,44 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
     for k, v in dict(
         q_lora_rank=None, qk_pos_emb_head_dim=config.kv_channels, rope_type="rope",
         rotary_percent=args.rotary_percent, rotary_base=args.rotary_base,
-        dsa_indexer_n_heads=int(os.environ.get("DSA_N_HEADS", "4")),
+        dsa_indexer_n_heads=int(os.environ.get("DSA_N_HEADS", "16")),
         dsa_indexer_head_dim=int(os.environ.get("DSA_HEAD_DIM", "128")),
         dsa_indexer_topk=int(os.environ.get("DSA_TOPK", "2048")),
         dsa_indexer_loss_coeff=float(os.environ.get("DSA_LOSS_COEFF", "0.1")),
         dsa_indexer_use_sparse_loss=(os.environ.get("DSA_SPARSE", "0") == "1"),
     ).items():
         setattr(config, k, v)
+    require_non_interleaved = os.environ.get("DSA_REQUIRE_NON_INTERLEAVED_ROPE", "1") == "1"
+    rotary_interleaved = bool(getattr(config, "rotary_interleaved", False))
+    if require_non_interleaved and rotary_interleaved:
+        raise RuntimeError(
+            "DSA indexer requires non-interleaved RoPE, but config.rotary_interleaved=True"
+        )
+    print_rank_0(
+        "DSA RoPE convention: "
+        f"interleaved={rotary_interleaved} required_non_interleaved={require_non_interleaved} "
+        f"pos_dim={config.qk_pos_emb_head_dim} base={config.rotary_base}"
+    )
     # Training-side metric logging reads args rather than TransformerConfig.
     args.dsa_indexer_loss_coeff = config.dsa_indexer_loss_coeff
 
-    pattern = os.environ.get("DSA_PATTERN", DEFAULT_PATTERN)
-    assert len(pattern) == config.num_layers, \
-        f"DSA_PATTERN len {len(pattern)} != num_layers {config.num_layers}"
+    pattern = os.environ.get("DSA_PATTERN", DEFAULT_PATTERN).upper()
+    if len(pattern) != config.num_layers:
+        raise RuntimeError(
+            f"DSA_PATTERN len {len(pattern)} != num_layers {config.num_layers}"
+        )
+    invalid_pattern = set(pattern) - {"S", "F"}
+    if invalid_pattern:
+        raise RuntimeError(f"DSA_PATTERN contains invalid layer codes: {invalid_pattern}")
+    if (
+        os.environ.get("DSA_SPARSE_RUN", "0") == "1"
+        and "F" in pattern
+        and os.environ.get("DSA_ALLOW_DENSE_LAYERS", "0") != "1"
+    ):
+        raise RuntimeError(
+            "sparse adaptation defaults to all-S because global dense layers cannot scale; "
+            "set DSA_ALLOW_DENSE_LAYERS=1 only for a bounded short-context diagnostic"
+        )
     spec = get_gqa_dsa_block_spec(TESpecProvider(), pattern, qk_layernorm=args.qk_layernorm)
     print_rank_0(f"DSA pattern ({pattern.count('S')}/{len(pattern)} sparse): {pattern} "
                  f"| topk={config.dsa_indexer_topk} sparse={config.dsa_indexer_use_sparse_loss}")
@@ -199,4 +228,45 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
                 return grad
 
             probe_param.register_hook(_probe_indexer_grad)
+
+    # Sparse adaptation must exercise both independent gradient paths: LM loss into
+    # the main model and selected-set KL into the detached indexer. Probe one tensor
+    # from each family during bounded correctness runs.
+    if (os.environ.get("DSA_SPARSE_RUN", "0") == "1"
+            and os.environ.get("DSA_GRAD_PROBE", "0") == "1"):
+        probe_params = {}
+        for name, param in model.named_parameters():
+            family = "indexer" if "indexer" in name else "main"
+            if family not in probe_params and param.requires_grad:
+                probe_params[family] = (name, param)
+            if len(probe_params) == 2:
+                break
+        if set(probe_params) != {"main", "indexer"}:
+            raise RuntimeError(
+                f"sparse grad probe could not find both parameter families: {probe_params.keys()}"
+            )
+        seen = {"main": False, "indexer": False}
+
+        def _make_sparse_grad_probe(family, name):
+            def _probe(grad):
+                if not seen[family] and (
+                    not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+                ):
+                    print_rank_0(
+                        f"DSA SPARSE {family.upper()} GRAD PROBE {name}: "
+                        f"norm={grad.float().norm().item():.9e} "
+                        f"max={grad.float().abs().max().item():.9e} "
+                        f"nonzero={torch.count_nonzero(grad).item()}/{grad.numel()}"
+                    )
+                    seen[family] = True
+                return grad
+
+            return _probe
+
+        for family, (name, param) in probe_params.items():
+            param.register_hook(_make_sparse_grad_probe(family, name))
+        print_rank_0(
+            "DSA sparse dual-gradient probes installed: "
+            + ", ".join(f"{family}={name}" for family, (name, _) in probe_params.items())
+        )
     return model

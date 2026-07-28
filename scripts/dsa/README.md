@@ -1,50 +1,94 @@
-# DSA (sparse attention) experiment — modular prototype
+# DeepSeek Sparse Attention overlay
 
-Self-contained prototype of **DeepSeek Sparse Attention (DSA)** as used in GLM-5
-(arXiv:2602.15763), for our OELLM Qwen3 **9B dense / GQA** model. Designed as a **modular
-experiment**: the core mechanism lives in pure PyTorch here and is validated *before* any
-Megatron integration. Full research plan: `../../docs/dsa_sparse_attention_plan.md`.
+This directory contains the OpenEuroLLM-owned DSA implementation, correctness tests, and LUMI
+launchers. It integrates with a pinned external Megatron checkout at runtime; it does not require a
+private Megatron fork.
 
-## Files
-- `lightning_indexer.py` — the module (framework-agnostic):
-  - `LightningIndexer` — scores past tokens per query: `I(t,s)=Σ_j w_{t,j}·ReLU(q^I_{t,j}·k^I_s)`
-  - `topk_sparse_mask` — deterministic top-k causal keep-mask (GLM-5 uses deterministic `topk`)
-  - `attention` — dense or sparse (GQA-aware), `attention_probs` — teacher distribution
-  - `indexer_kl_loss` — warm-up loss `KL(stopgrad(p_attn) ‖ softmax(I))` (stop-grad to main model)
-  - `topk_recall` — quality metric: fraction of true attention mass captured by top-k
-- `test_dsa.py` — correctness + behaviour tests (`python test_dsa.py`, CPU, ~seconds)
+Read [the canonical sparse-attention overview](../../docs/sparse_attention_dsa.md) before launching
+training. It records the architecture, LUMI evidence, known limitations, and gated route to
+512K–2M.
 
-## Validated (proof-of-concept results)
+## Current state
+
+Validated:
+
+- 300-step all-layer indexer warm-up at 8K;
+- exact causal blocked top-k versus a dense reference;
+- selected-set KL with a native-GQA teacher;
+- ROCm Triton native-GQA forward/backward versus dense attention;
+- non-interleaved indexer RoPE;
+- one full sparse update with finite LM/indexer losses; and
+- nonzero gradients in both the main model and indexer.
+
+Not yet implemented or validated:
+
+- sustained sparse adaptation and sparse checkpoint reload;
+- context-parallel global top-k;
+- scalable selected-set-KL retention at 512K–2M;
+- subquadratic/hierarchical indexer candidate generation;
+- sparse prefill/decode and KV-cache integration; and
+- model export and serving.
+
+## Production-path files
+
+- `gpt_builders.py` — import shim expected by Megatron's `pretrain_gpt.py`
+- `MEGATRON_REVISION` — exact external Megatron commit used by the validated LUMI gates
+- `gpt_builders_dsa.py` — config bridge, fail-closed checkpoint load, freeze logic, gradient probes
+- `megatron_gqa_dsa.py` — GQA-aware DSA module and layer specifications
+- `chunked_indexer.py` — exact causal query/key-blocked selection and retention guard
+- `dsa_sparse_loss.py` — selected-set KL with detached native-GQA teacher
+- `dsa_patches.py` — sparse path, unsupported-mode guards, and recall logging
+- `triton_dsa.py` — ROCm Triton sparse attention forward/backward
+- `test_dsa_correctness.py` — dense-reference correctness suite
+- `lumi/dsa_warmup_failclosed.sbatch` — frozen-indexer warm-up launcher
+- `lumi/dsa_sparse_8k_correctness.sbatch` — one-step sparse integration gate
+
+Other modules in this directory are earlier prototypes, diagnostics, or layer-search experiments.
+They are useful for research history but are not the current production path.
+
+## Correctness tests
+
+Local CPU test:
+
+```bash
+python3 scripts/dsa/test_dsa_correctness.py --cpu-only
 ```
-[OK] sparse(k=T) == dense            (max err 0.00e+00)     # exactness
-[OK] causal: no future-token selection
-[OK] GQA 32q/8kv -> out normalized                          # our arch
-[OK] random indexer recall ~0.59 (k/T baseline)
-[OK] indexer learns: top-16/64 recall 0.57 -> 0.98          # the crux: it works
+
+This tests exact selection and selected-set KL. It reports a clear RoPE skip when Megatron is not
+installed.
+
+LUMI CPU gate with Megatron required:
+
+```bash
+PYTHONPATH="scripts/dsa:$MEGATRON_ROOT:$PYTHONPATH" \
+  python3 scripts/dsa/test_dsa_correctness.py --cpu-only --require-megatron-rope
 ```
-The indexer **learns to predict attention** (98% mass captured at k = T/4). This de-risks the
-central DSA claim for our GQA model. (The raw KL number in the test is inflated by a deliberately
-peaked synthetic teacher; the *recall* is the metric that matters.)
 
-## Two-phase training (matches GLM-5)
-1. **Dense warm-up:** run dense, train *only* the indexer via `indexer_kl_loss` (stop-grad to main
-   model → LM untouched). Stop when `topk_recall(k)` ≥ ~0.9 at the target k.
-2. **Sparse adaptation:** switch to `topk_sparse_mask(k)` + `attention(keep_mask=...)`, train
-   end-to-end; keep the indexer KL on the selected set. k: 1024@128K → 2048@≥512K.
+LUMI GPU gate:
 
-## Megatron integration (next step, modular)
-Hook point found: `megatron/core/transformer/experimental_attention_variant/` +
-`experimental_attention_variant_module_specs.py` — a drop-in slot for a custom `core_attention`.
-Plan:
-1. Wrap this module as a `core_attention` variant: takes (q,k,v) + hidden_states, returns context.
-2. A run flag selects `dense | dsa_warmup | dsa_sparse` so it's a clean A/B vs the dense baseline.
-3. Start with this pure-PyTorch path (correct, slower) to validate quality at 128K on a real
-   checkpoint; only then write fused ROCm/Triton kernels for the 1.5–2× speedup.
-4. CP interaction (context-parallel + top-k over a sharded sequence) is the hardest integration
-   piece — prototype single-GPU/short-seq first.
+```bash
+PYTHONPATH="scripts/dsa:$MEGATRON_ROOT:$PYTHONPATH" \
+  python3 scripts/dsa/test_dsa_correctness.py
+```
 
-## Why this is the right experiment shape
-- **Modular:** core logic is testable in isolation; integration is a thin adapter.
-- **Gated:** each phase has a measurable pass criterion (recall, then NIAH depth-0).
-- **Additive & independent:** does not touch the dense-ABF / θ-law track; it's the route to 1M+
-  once dense attention hits its wall.
+The GPU gate additionally compares native-GQA Triton forward/backward with a dense reference.
+
+## Runtime integration
+
+Place `scripts/dsa` before Megatron on `PYTHONPATH`. Megatron imports `gpt_builders` by module
+name, so the shim selects `gpt_builders_dsa.gpt_builder`. The builder then installs sparse patches
+only when `DSA_SPARSE_RUN=1`.
+
+Sparse adaptation fails closed unless:
+
+- `DSA_SPARSE=1`;
+- `DSA_FREEZE_MODEL=0`;
+- the selected-set KL coefficient is positive;
+- every layer is `S` (unless a bounded diagnostic explicitly sets
+  `DSA_ALLOW_DENSE_LAYERS=1`);
+- the indexer uses non-interleaved RoPE; and
+- context parallelism is one.
+
+The exact indexer avoids allocating an L×L score tensor, but it still performs O(L²) arithmetic.
+Do not describe the current end-to-end system as O(Lk), and do not submit the archived 512K sparse
+launcher.

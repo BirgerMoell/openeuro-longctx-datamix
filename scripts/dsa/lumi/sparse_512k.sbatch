@@ -16,6 +16,16 @@
 # to mimic attention (DSA_SPARSE=0), model NOT frozen (autoscaler balances model+indexer). Hybrid
 # pattern from dsa_layer_search (18/36 sparse). Short 16K context = cheap+fast (indexer learns
 # "which tokens matter", length-generalizes). 1 node (TP=8, CP=1). Watch: indexer loss ↓, grad>0.
+#
+# ARCHIVED / FAIL-CLOSED:
+# This launcher predates the validated selected-set-KL sparse path. Its body combines
+# DSA_SPARSE_RUN=1 with DSA_SPARSE=0, uses context parallelism that the current sparse
+# path cannot implement correctly, and would leave global dense layers at 512K.
+# Keep the historical recipe below for auditability, but never submit it.
+echo "FATAL: sparse_512k.sbatch is archived and intentionally disabled."
+echo "Run dsa_sparse_8k_correctness.sbatch, then implement/validate CP top-k before 512K."
+exit 1
+
 if [ -z ${SLURM_JOB_ID+x} ]; then mkdir -p logs; sbatch "$0" "$@"; exit; fi
 set -uo pipefail; module purge
 CONTAINER=/scratch/project_465002530/users/bmoell/containers/laif-rocm-6.4.4-pytorch-2.9.1-te-2.4.0-fa-2.8.0-triton-3.2.0.sif

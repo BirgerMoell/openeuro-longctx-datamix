@@ -1,5 +1,11 @@
 # Sparse-attention long-context plan (DSA), adapted from GLM-5 (arXiv:2602.15763)
 
+> **Historical proposal (2026-06-29).** Several assumptions and budgets below predate the
+> validated LUMI implementation. In particular, exact blocked indexing is still O(L²), context
+> parallel sparse selection is not implemented, and Kimi K3 uses KDA rather than DSA. See
+> [sparse_attention_dsa.md](sparse_attention_dsa.md) for the canonical 2026-07-28 status,
+> evidence, implementation map, and gated roadmap.
+
 **Status:** independent research track, **additional** to the current dense-ABF / θ-law work and
 the prelude extension. Promising next step *if* it works. Date: 2026-06-29.
 

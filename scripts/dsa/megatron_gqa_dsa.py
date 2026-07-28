@@ -11,11 +11,12 @@ but gates it to MLA. This module makes it usable with our GQA Qwen3:
 Config to set (TransformerConfig): dsa_indexer_n_heads, dsa_indexer_head_dim, dsa_indexer_topk,
 dsa_indexer_loss_coeff, dsa_indexer_use_sparse_loss; q_lora_rank=None; rope_type='rope', rotary_base=θ.
 
-TP note: reconstructing x from the query is valid at TP=1 (query reshapes to full hidden_size).
-For TP>1 the query is head-sharded — production needs the real hidden_states threaded in
-(see docs/dsa_gqa_integration.md, route 1). This adapter targets the single-GPU smoke test + TP=1.
+For TP>1 the query is head-sharded, so GQADSASelfAttention threads the real sequence-parallel
+hidden states into the core and the indexer gathers them across TP. Sparse context parallelism is
+a separate problem and is intentionally rejected by dsa_patches.py.
 """
 import torch
+import megatron.core.transformer.experimental_attention_variant.dsa as _dsa
 from megatron.core.transformer.attention import SelfAttention, SelfAttentionSubmodules
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.spec_utils import ModuleSpec
@@ -31,10 +32,16 @@ class GQADSAttention(DSAttention):
 
     def forward(self, query, key, value, attention_mask, attn_mask_type=None,
                 attention_bias=None, packed_seq_params=None):
-        # GQA: expand KV heads to match query heads (like DotProductAttention's repeat_interleave).
+        # Attribute diagnostics to the actual transformer layer. The previous global
+        # layer-call counter accidentally sampled only layer 36 in the all-S pilot.
+        _dsa._oellm_current_layer = (self.layer_number, self.config.num_layers)
+
+        # Dense upstream DSA assumes equal Q/K/V head counts. The patched sparse
+        # Triton path maps each query head to its native KV group and must not copy K/V.
         ng = key.shape[2]
         np = query.shape[2]
-        if np // ng > 1:
+        native_gqa = getattr(_dsa, "_oellm_native_gqa_sparse", False)
+        if not native_gqa and np // ng > 1:
             key = key.repeat_interleave(np // ng, dim=2)
             value = value.repeat_interleave(np // ng, dim=2)
         sq, b, np, hn = query.shape
@@ -80,7 +87,7 @@ def get_gqa_dsa_attention_spec(config, backend):
     qkv = (backend.column_parallel_layer_norm_linear()
            if config.qk_layernorm else backend.column_parallel_linear())
     return ModuleSpec(
-        module=SelfAttention,
+        module=GQADSASelfAttention,
         params={"attn_mask_type": AttnMaskType.causal},
         submodules=SelfAttentionSubmodules(
             linear_qkv=qkv,

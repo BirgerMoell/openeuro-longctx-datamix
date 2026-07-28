@@ -17,3 +17,15 @@ a short stage, low peak LR), not a high-peak pretraining anneal. Whether the bas
 themselves annealed, and whether a higher-peak / longer extension anneal helps (esp. the 1T-base
 lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/dsa_training_recipe.md`,
 `docs/sparse_attention_dsa.md`.
+
+## DSA launchers
+
+| script | purpose | status |
+|---|---|---|
+| `dsa_warmup_failclosed.sbatch` | Frozen-base, all-layer 8K indexer warm-up | Validated; job 20291047 completed 300 steps |
+| `dsa_sparse_8k_correctness.sbatch` | One-step sparse update with selected-set KL and dual-gradient probes | Validated recipe; source of job 20336946 |
+| `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
+
+The current sparse path supports TP=8 but deliberately rejects CP>1. Do not start 512K–2M sparse
+training until distributed global top-k, selected-K/V exchange, and streamed selected-set KL have
+their own correctness gates. See [the canonical DSA overview](../../../docs/sparse_attention_dsa.md).
