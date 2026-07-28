@@ -133,7 +133,7 @@ CMD=" $PRETRAIN_GPT \
   --data-path $DATA --data-cache-path $EXT/cache_dsa_sparse8k --split 100,0,0 \
   --tokenizer-type HuggingFaceTokenizer --tokenizer-model $TOK \
   --make-vocab-size-divisible-by 128 --dataloader-type cyclic --num-workers 1 \
-  --ckpt-format torch_dist --no-ckpt-fully-parallel-save $LOAD_ARGS \
+  --ckpt-format torch_dist $LOAD_ARGS \
   --save $OUT --save-interval $SAVE_INTERVAL \
   --eval-interval 100000 --eval-iters 0 --log-interval 1 --log-throughput "
 
