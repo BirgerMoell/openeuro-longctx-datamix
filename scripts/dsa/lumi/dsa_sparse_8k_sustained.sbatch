@@ -17,7 +17,7 @@
 set -euo pipefail
 module purge
 
-DSADIR=${DSADIR:-/scratch/project_465002530/users/bmoell/dsa_exp/repo_13b0836}
+DSADIR=${DSADIR:-/scratch/project_465002530/users/bmoell/dsa_exp/repo_10a949e}
 MEG=${MEGATRON_ROOT:-/scratch/project_465002530/users/luomajou/oellm-test/NVIDIA-Megatron-LM}
 EXT=${LONGCTX_ROOT:-/scratch/project_465002530/users/bmoell/longctx-extend}
 WARM=${DSA_WARM_CHECKPOINT:-$EXT/output_dsa_warm_all_s_8k}
