@@ -119,3 +119,27 @@ scaling, and ideally their rotary geometry next time) is the right lesson.
   (huggingface.co/Qwen/Qwen3.5-27B)
 - Our θ-law + sweep: `docs/depth0_diagnosis_theta_sweep.md`.
 - Short-context mechanism + mitigations: `docs/sparse_attention_dsa.md`, LongRoPE2 (arXiv:2502.20082).
+
+---
+
+## 6. Geometry-normalized comparison (the apples-to-apples number)
+
+Raw θ isn't comparable across different `rotary_dim`. The comparable quantity is the **slowest-dim
+wavelength relative to context** — `λ_max/L`, where `λ_max = 2π·θ^((rotary_dim−2)/rotary_dim)` — which
+normalizes out the head_dim/partial-rotary difference. At 256K (L=262144):
+
+| | θ | rotary_dim | λ_max (tokens) | **λ_max / L (aggressiveness)** |
+|---|---|---|---|---|
+| **Ours** | 64M | 128 | 3.0×10⁸ | **1158×** |
+| **Qwen3.5** | 10M | 64 | 3.8×10⁷ | **145×** |
+
+**We are ~8× more aggressive than Qwen at the same 256K**, even after normalizing for geometry.
+To *match* Qwen's aggressiveness on our rotary_dim-128 geometry would be **θ ≈ 7.7M**.
+
+**The tension:** our own 128K sweep shows θ≈8M → depth-0 ≈ 0%. So matching Qwen's aggressiveness
+(~7.7M on our geometry) would *fail* our depth-0 bar. i.e. the λ_max/L heuristic (slowest dim) does
+not by itself predict our depth-0 threshold — depth-0 failure is driven by mid/high-freq dims going
+OOD, which Qwen offsets with partial-rotary + YaRN + heavy long-context training, and we (full-rotary,
+short native ABF) must offset with a much higher θ. Conclusion: we are **plausibly over-scaled**
+(1158× vs 145×), but the true floor sits between "Qwen-equivalent ~8M (fails our bar)" and "our
+confirmed 64M (works)" — resolved empirically by the θ-sweep in §7.
