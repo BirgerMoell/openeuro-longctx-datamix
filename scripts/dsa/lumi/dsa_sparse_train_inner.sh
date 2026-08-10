@@ -19,7 +19,10 @@ if [ "$MODULE_PATH" != "$EXPECTED_PATH" ]; then
   exit 1
 fi
 
-read -r -a DATA_ARGS < "$DATA_BLEND_FILE"
+# Read the entire whitespace-delimited blend. `read` returns failure when a
+# regular file ends without a newline (as the production blend currently
+# does), so append an explicit NUL delimiter and consume through that instead.
+IFS=$' \t\r\n' read -r -d '' -a DATA_ARGS < <(cat "$DATA_BLEND_FILE"; printf '\0')
 if [ "${#DATA_ARGS[@]}" -eq 0 ] || [ $(( ${#DATA_ARGS[@]} % 2 )) -ne 0 ]; then
   echo "FATAL: invalid weight/prefix data blend: $DATA_BLEND_FILE"
   exit 1
