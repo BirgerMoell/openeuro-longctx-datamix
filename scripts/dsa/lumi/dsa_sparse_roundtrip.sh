@@ -57,11 +57,11 @@ singularity exec -B "$DSADIR" -B "$EXT" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
 
 if [ "${RUN_GPU_TESTS:-0}" = "1" ]; then
   echo "##### GPU dense-reference and 2-rank RCCL gates"
-  srun --nodes=1 --ntasks=1 --gpus-per-task=1 singularity exec \
+  srun --nodes=1 --ntasks=1 singularity exec \
     -B "$DSADIR" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
     "export PYTHONPATH=$DSADIR:$MEG:\${PYTHONPATH:-}; python3 $DSADIR/test_dsa_correctness.py"
   TEST_PORT=$((MASTER_PORT + 1))
-  srun --nodes=1 --ntasks=2 --ntasks-per-node=2 --gpus-per-task=1 singularity exec \
+  srun --nodes=1 --ntasks=2 --ntasks-per-node=2 singularity exec \
     -B "$DSADIR" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
     "export PYTHONPATH=$DSADIR:$MEG:\${PYTHONPATH:-} MASTER_ADDR=$MASTER_ADDR \
       MASTER_PORT=$TEST_PORT WORLD_SIZE=2 RANK=\$SLURM_PROCID LOCAL_RANK=\$SLURM_LOCALID; \
