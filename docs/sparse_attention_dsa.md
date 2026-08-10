@@ -228,10 +228,10 @@ non-interleaved indexer convention.
 | Native-GQA sparse core | Validated at small/8K scale | ROCm Triton fwd/bwd and integration gate |
 | Dual LM + selected-KL gradients | Validated for one step | Job 20336946 |
 | Sustained sparse adaptation | Not run | Next quality gate |
-| Sparse checkpoint save/reload | Implemented, GPU gate pending | 8K round-trip launcher |
+| Sparse checkpoint save/reload | Validated at 8K | Job 20927044: complete iterations 301/302 and fresh-process reload |
 | Context parallelism | Implemented, GPU gate pending | Zig-zag gather/autograd CPU tests; CP2 next |
 | Hierarchical candidate generation | Implemented, quality unmeasured | 256-token current + 1 routed block |
-| 128K+ memory behavior | Not validated | 64K/CP2 keeps final 32K local length and is the memory gate |
+| 128K+ memory behavior | Not validated | 64K/CP2 keeps final 32K local length and is the next memory gate |
 | 512K training | Prepared, gated | Run only after 8K and 64K round trips pass |
 | 1M–2M training | Blocked | Replace replicated global K/V and reduce/stream selected state |
 | Sparse prefill | Not implemented | Current path assumes aligned full self-attention |
@@ -242,8 +242,9 @@ non-interleaved indexer convention.
 
 ### P0 — execute the prepared correctness ladder
 
-1. Run `dsa_sparse_8k_roundtrip.sbatch`: GPU dense-reference tests, two-rank RCCL gather test,
-   update 301, full checkpoint, fresh-process reload, update 302.
+1. **Passed (job 20927044):** `dsa_sparse_8k_roundtrip.sbatch` completed the GPU dense-reference
+   tests, two-rank RCCL gather test, update 301, full checkpoint, fresh-process reload, and update
+   302.
 2. If and only if that passes, run `dsa_sparse_64k_cp2_roundtrip.sbatch`. Its CP-local length is
    32K, matching the final CP16 topology, so it is the cheap communication/memory gate.
 3. If and only if that passes, run `dsa_sparse_512k_cp16_roundtrip.sbatch` on 16 nodes. Success
@@ -251,6 +252,26 @@ non-interleaved indexer convention.
 4. Compare dense and sparse loss/logits on fixed held-out batches before any sustained run.
 5. Only then choose a longer adaptation schedule and evaluate short-context retention and
    NIAH/RULER-style retrieval against the dense 256K model.
+
+### 8K round-trip result (2026-08-10)
+
+LUMI job `20927044` completed in 16:41 with exit `0:0` from immutable overlay commit `a8e3551`.
+The run used TP8/CP1, all 36 sparse layers, an 8,192-token sequence, 256-token blocks, and
+top-k 512. Both the GPU dense-reference suite and the two-rank RCCL/autograd gate passed.
+
+Iteration 301, loaded from the warm iteration-300 checkpoint, reported LM loss `1.002608`,
+indexer loss `0.675808`, and finite grad norm `986.932`. A fresh process then loaded the complete
+iteration-301 model, optimizer, RNG, and scheduler state; iteration 302 reported LM loss
+`1.084992`, indexer loss `0.553277`, and finite grad norm `2702.599`. Both updates had zero NaN
+and skipped iterations, and both indexer and main-model gradient probes were nonzero. Independent
+post-run validation found 16 distributed shards plus `.metadata` and `common.pt` for each of
+iterations 301 and 302; the final artifact is about 297 GiB and its marker is 302.
+
+Three fail-closed launcher defects were found and fixed before the passing run: informational
+Megatron stdout contaminating the module-origin comparison, a data blend without a final newline,
+and the legacy `--recompute-activations` flag overriding full recomputation with selective
+recomputation. The preflight now rejects that recomputation regression. No 64K or 512K job has
+been submitted; CP2/64K remains the next explicit approval gate.
 
 ### P1 — make long training possible
 
@@ -312,7 +333,7 @@ a drop-in match for this GQA model.
 
 ## Recommended sequence of experiments
 
-1. **8K round trip:** GPU oracle + RCCL collective + save/reload.
+1. **8K round trip — passed (job 20927044):** GPU oracle + RCCL collective + save/reload.
 2. **64K/CP2 round trip:** same 32K local sequence as the final job.
 3. **512K/CP16 round trip:** two sparse updates with a full checkpoint boundary.
 4. **Quality gate:** dense-vs-sparse loss/logits, attention-mass recall, retrieval, and short-context

@@ -25,8 +25,8 @@ lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/
 | `dsa_warmup_failclosed.sbatch` | Frozen-base, all-layer 8K indexer warm-up | Validated; job 20291047 completed 300 steps |
 | `dsa_sparse_8k_correctness.sbatch` | One-step sparse update with selected-set KL and dual-gradient probes | Validated recipe; source of job 20336946 |
 | `dsa_sparse_8k_sustained.sbatch` | Resumable 500-update sparse adaptation | Deferred quality gate; do not run before round trips |
-| `dsa_sparse_8k_roundtrip.sbatch` | GPU/RCCL tests, sparse update, full save, fresh-process reload | Prepared; first approval gate |
-| `dsa_sparse_64k_cp2_roundtrip.sbatch` | Two-node CP2 round trip at 32K local tokens/rank | Prepared; run only after 8K passes |
+| `dsa_sparse_8k_roundtrip.sbatch` | GPU/RCCL tests, sparse update, full save, fresh-process reload | **Passed; job 20927044, commit a8e3551** |
+| `dsa_sparse_64k_cp2_roundtrip.sbatch` | Two-node CP2 round trip at 32K local tokens/rank | Prepared; next explicit approval gate |
 | `dsa_sparse_512k_cp16_roundtrip.sbatch` | 16-node CP16 512K round trip | Prepared; run only after 8K and 64K pass |
 | `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
 

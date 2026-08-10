@@ -20,13 +20,13 @@ Validated:
 - one full sparse update with finite LM/indexer losses; and
 - nonzero gradients in both the main model and indexer;
 - Megatron CP zig-zag reorder and summed collective backward on two CPU ranks; and
-- causal hierarchical block routing without future-query leakage.
+- causal hierarchical block routing without future-query leakage; and
+- an 8K GPU/RCCL save/reload round trip through complete iterations 301 and 302 (job 20927044).
 
 Not yet implemented or validated:
 
-- sustained sparse adaptation and sparse checkpoint reload;
+- sustained sparse adaptation;
 - GPU integration of the new CP2/CP16 path;
-- sparse checkpoint save/reload (the round-trip launcher is prepared but not yet run);
 - quality/recall of the coarse 512-token block route;
 - selected-row rather than replicated-global K/V transport for 1M–2M;
 - sparse prefill/decode and KV-cache integration; and
