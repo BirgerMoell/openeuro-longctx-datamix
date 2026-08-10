@@ -43,6 +43,19 @@ def validate_data_blend(path: Path):
     return len(fields) // 2
 
 
+def validate_training_launcher(path: Path):
+    text = path.read_text()
+    if "--recompute-activations" in text:
+        raise RuntimeError(
+            "legacy --recompute-activations overrides full recompute with selective: "
+            f"{path}"
+        )
+    required = ("--recompute-granularity full", "--recompute-method uniform")
+    missing = [fragment for fragment in required if fragment not in text]
+    if missing:
+        raise RuntimeError(f"training launcher is missing full recompute args {missing}: {path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dsa-dir", type=Path, required=True)
@@ -84,6 +97,7 @@ def main():
 
     complete_checkpoint(args.warm_checkpoint, 300)
     pairs = validate_data_blend(args.data_blend)
+    validate_training_launcher(args.dsa_dir / "lumi" / "dsa_sparse_train_inner.sh")
     if args.seq_length % (2 * args.cp_size * args.block_size):
         raise RuntimeError("sequence length is not aligned to Megatron CP halves and DSA blocks")
     expected_topk = args.block_size * (1 + args.routed_blocks)

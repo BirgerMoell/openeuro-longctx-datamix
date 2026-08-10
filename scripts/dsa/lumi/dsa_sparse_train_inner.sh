@@ -50,7 +50,7 @@ exec python3 -u -m pretrain_gpt \
   --no-create-attention-mask-in-dataloader \
   --tensor-model-parallel-size 8 --pipeline-model-parallel-size 1 \
   --context-parallel-size "$CP_SIZE" --sequence-parallel --use-distributed-optimizer \
-  --recompute-activations --recompute-granularity full --recompute-method uniform \
+  --recompute-granularity full --recompute-method uniform \
   --recompute-num-layers 1 \
   --micro-batch-size 1 --global-batch-size 1 --train-iters 302 --bf16 \
   --optimizer adam --adam-beta1 0.9 --adam-beta2 0.95 --adam-eps 1e-8 \
