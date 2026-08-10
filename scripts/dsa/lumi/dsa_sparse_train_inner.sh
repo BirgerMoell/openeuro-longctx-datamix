@@ -8,7 +8,9 @@ set -euo pipefail
 
 export RANK=${RANK:-${SLURM_PROCID:?}} LOCAL_RANK=${LOCAL_RANK:-${SLURM_LOCALID:?}}
 export PYTHONPATH="$DSADIR:$MEG:${PYTHONPATH:-}"
-MODULE_PATH=$(python3 -c 'import pathlib, gpt_builders; print(pathlib.Path(gpt_builders.__file__).resolve())')
+# Importing Megatron emits informational lines on stdout. The resolved module
+# path is deliberately printed last; retain only that line for the comparison.
+MODULE_PATH=$(python3 -c 'import pathlib, gpt_builders; print(pathlib.Path(gpt_builders.__file__).resolve())' | tail -n 1)
 EXPECTED_PATH=$(readlink -f "$DSADIR/gpt_builders.py")
 if [ "$MODULE_PATH" != "$EXPECTED_PATH" ]; then
   echo "FATAL: wrong gpt_builders import on rank ${RANK:-?}"
