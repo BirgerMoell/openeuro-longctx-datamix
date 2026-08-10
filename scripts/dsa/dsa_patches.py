@@ -5,9 +5,10 @@ The patch keeps the official two-gradient-path design:
 * LM loss differentiates through sparse attention into the main model.
 * Selected-set KL differentiates into the detached lightning indexer only.
 
-Selection is causal and score-memory-blocked, K/V stay in native GQA form, and
-unsupported masks/context parallelism fail closed. Exact flat selection is still
-O(L^2) arithmetic and is intentionally guarded as an 8K correctness bridge.
+Selection is causal, K/V stay in native GQA form, and unsupported masks fail
+closed. ``flat_exact`` remains the 8K reference router. ``block_cp`` adds a
+hierarchical router and differentiable global K/V exchange for a correctness-
+first 512K context-parallel pipeline.
 """
 
 import os
@@ -22,7 +23,9 @@ from megatron.core.transformer.experimental_attention_variant.dsa import (
 )
 
 from chunked_indexer import chunked_topk
+from cp_utils import cp_global_positions, cp_topology, gather_global_sequence
 from dsa_sparse_loss import selected_set_indexer_loss
+from hierarchical_indexer import hierarchical_block_topk
 from triton_dsa import triton_dsa_attn
 
 try:
@@ -42,7 +45,7 @@ def _group_size(group):
 
 
 def _chunked_forward_with_scores(self, x, qr, mask=None, packed_seq_params=None):
-    """Original indexer projections plus exact causal blocked selected scores."""
+    """Original indexer projections plus the selected fail-closed router."""
     if packed_seq_params is not None:
         raise NotImplementedError("packed sequences are not supported by sparse DSA")
 
@@ -75,16 +78,45 @@ def _chunked_forward_with_scores(self, x, qr, mask=None, packed_seq_params=None)
     weights, _ = self.linear_weights_proj(x)
     weights = weights * (self.index_n_heads**-0.5) * self.softmax_scale
 
-    selected_scores, selected_indices = chunked_topk(
+    router = os.environ.get("DSA_ROUTER", "flat_exact").lower()
+    cp_group = getattr(self.pg_collection, "cp", None)
+    cp_size, cp_rank = cp_topology(cp_group)
+    if router == "flat_exact":
+        if cp_size != 1:
+            raise RuntimeError(
+                "flat_exact cannot produce global CP indices; use DSA_ROUTER=block_cp"
+            )
+        return chunked_topk(
+            q,
+            weights,
+            k,
+            min(self.index_topk, seqlen),
+            mask=mask,
+            block=int(os.environ.get("DSA_INDEX_BLOCK", "8192")),
+            q_block=int(os.environ.get("DSA_INDEX_Q_BLOCK", "512")),
+        )
+    if router != "block_cp":
+        raise RuntimeError(f"unknown DSA_ROUTER={router!r}; expected flat_exact or block_cp")
+    if mask is not None:
+        raise NotImplementedError("block_cp accepts only the implicit causal mask")
+
+    query_positions = cp_global_positions(seqlen, cp_size, cp_rank, device=q.device)
+    global_k = gather_global_sequence(k, cp_group)
+    max_seq = int(os.environ.get("DSA_CP_MAX_SEQ", "524288"))
+    if global_k.shape[0] > max_seq and os.environ.get("DSA_ALLOW_LONGER_CP", "0") != "1":
+        raise RuntimeError(
+            f"block_cp global sequence {global_k.shape[0]} exceeds validated cap {max_seq}; "
+            "set DSA_ALLOW_LONGER_CP=1 only for a separately reviewed experiment"
+        )
+    return hierarchical_block_topk(
         q,
         weights,
-        k,
-        min(self.index_topk, seqlen),
-        mask=mask,
-        block=int(os.environ.get("DSA_INDEX_BLOCK", "8192")),
-        q_block=int(os.environ.get("DSA_INDEX_Q_BLOCK", "512")),
+        global_k,
+        query_positions,
+        self.index_topk,
+        block_size=int(os.environ.get("DSA_BLOCK_SIZE", "256")),
+        routed_blocks=int(os.environ.get("DSA_ROUTED_BLOCKS", "1")),
     )
-    return selected_scores, selected_indices
 
 
 def _selected_indexer_loss_bridge(
@@ -136,11 +168,8 @@ def _sparse_dsa_forward(
         )
     if query.shape[0] != key.shape[0]:
         raise NotImplementedError(
-            f"only aligned causal self-attention is supported: sq={query.shape[0]} sk={key.shape[0]}"
-        )
-    if _group_size(getattr(self.indexer.pg_collection, "cp", None)) != 1:
-        raise NotImplementedError(
-            "context parallel sparse DSA is not implemented correctly yet; refusing to run"
+            "the input must be aligned CP-local causal self-attention: "
+            f"sq={query.shape[0]} sk={key.shape[0]}"
         )
 
     # Standard Megatron may hand us a prebuilt causal attention_mask. It is intentionally
@@ -151,12 +180,51 @@ def _sparse_dsa_forward(
             f"unsupported attention mask shape for causal sparse DSA: {attention_mask.shape}"
         )
 
+    router = os.environ.get("DSA_ROUTER", "flat_exact").lower()
+    cp_group = getattr(self.indexer.pg_collection, "cp", None)
+    cp_size, cp_rank = cp_topology(cp_group)
+    if router == "flat_exact" and cp_size != 1:
+        raise RuntimeError("flat_exact sparse attention requires context parallel size 1")
+    if router not in ("flat_exact", "block_cp"):
+        raise RuntimeError(f"unknown DSA_ROUTER={router!r}")
+
     selected_scores, selected_indices = self.indexer.forward_with_scores(
         x.detach(), qr.detach(), mask=None, packed_seq_params=None
     )
-    output = _dsa.unfused_dsa_fn(
-        query, key, value, selected_indices, self.softmax_scale
+    query_positions = cp_global_positions(
+        query.shape[0], cp_size, cp_rank, device=query.device
     )
+    if router == "block_cp":
+        key = gather_global_sequence(key, cp_group)
+        value = gather_global_sequence(value, cp_group)
+    if selected_indices.shape[:2] != (query.shape[1], query.shape[0]):
+        raise RuntimeError(
+            f"router returned wrong selection shape {selected_indices.shape} for q={query.shape}"
+        )
+    if torch.any(selected_indices.to(torch.int64) > query_positions.view(1, -1, 1)):
+        raise RuntimeError("router returned non-causal global token indices")
+    output = triton_dsa_attn(
+        query,
+        key,
+        value,
+        selected_indices,
+        self.softmax_scale,
+        query_positions=query_positions,
+    )
+
+    if not getattr(_dsa, "_oellm_runtime_logged", False):
+        retained = selected_indices.numel() * (
+            selected_indices.element_size() + selected_scores.element_size()
+        )
+        if not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0:
+            print(
+                "[dsa runtime] "
+                f"router={router} cp={cp_size} local_q={query.shape[0]} global_k={key.shape[0]} "
+                f"topk={selected_indices.shape[-1]} retained={retained / 1024**2:.1f}MiB "
+                f"qpos=[{query_positions.min().item()},{query_positions.max().item()}]",
+                flush=True,
+            )
+        _dsa._oellm_runtime_logged = True
 
     if self.training and torch.is_grad_enabled():
         coeff = float(getattr(self.config, "dsa_indexer_loss_coeff", 0.0))
@@ -178,6 +246,7 @@ def _sparse_dsa_forward(
             loss=indexer_loss,
             layer_number=self.layer_number,
             num_layers=self.config.num_layers,
+            avg_group=cp_group if cp_size > 1 else None,
         )
         output = _dsa.DSAIndexerLossAutoScaler.apply(output, indexer_loss)
 
@@ -196,8 +265,8 @@ def apply_sparse_dsa_patches():
     _dsa._oellm_native_gqa_sparse = True
     _dsa._oellm_sparse_correctness_patch = True
     print(
-        "[dsa_patches] sparse DSA correctness path enabled: causal blocked selection + "
-        "native GQA Triton + selected-set KL",
+        "[dsa_patches] sparse DSA enabled: fail-closed router + native GQA Triton + "
+        "selected-set KL",
         flush=True,
     )
 
@@ -303,6 +372,10 @@ def _maybe_log_recall(
 
 def apply_indexer_recall_logging(every=36, k_eval=None):
     """Wrap the active indexer loss with staggered, correctly attributed recall probes."""
+    if os.environ.get("DSA_ROUTER", "flat_exact").lower() == "block_cp":
+        raise RuntimeError(
+            "dense attention-mass recall is intentionally disabled for block_cp at long context"
+        )
     if getattr(_dsa, "_oellm_recall_wrapper", False):
         return
     ks_env = os.environ.get("DSA_RECALL_KS", "512,1024,2048")

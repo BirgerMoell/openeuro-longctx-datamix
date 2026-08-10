@@ -27,8 +27,8 @@ def _fwht(x):
     return (y * (d ** -0.5)).reshape(shp).to(x.dtype)
 _dsa.rotate_activation = _fwht
 
-# SPARSE RUN: enable Triton O(L*k) attention, exact causal blocked index selection, and
-# selected-set KL. Selection is still O(L^2) arithmetic, so this is an 8K correctness bridge.
+# SPARSE RUN: enable Triton O(L*k) attention and selected-set KL. ``flat_exact``
+# is the 8K reference router; ``block_cp`` is the hierarchical long-context path.
 if os.environ.get("DSA_SPARSE_RUN", "0") == "1":
     if os.environ.get("DSA_SPARSE", "0") != "1":
         raise RuntimeError("DSA_SPARSE_RUN=1 requires DSA_SPARSE=1 (selected-set KL)")
@@ -76,6 +76,43 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
     # Training-side metric logging reads args rather than TransformerConfig.
     args.dsa_indexer_loss_coeff = config.dsa_indexer_loss_coeff
 
+    router = os.environ.get("DSA_ROUTER", "flat_exact").lower()
+    if router not in ("flat_exact", "block_cp"):
+        raise RuntimeError(f"unknown DSA_ROUTER={router!r}")
+    if os.environ.get("DSA_SPARSE_RUN", "0") == "1" and router == "block_cp":
+        block_size = int(os.environ.get("DSA_BLOCK_SIZE", "256"))
+        routed_blocks = int(os.environ.get("DSA_ROUTED_BLOCKS", "1"))
+        expected_topk = block_size * (1 + routed_blocks)
+        if config.dsa_indexer_topk != expected_topk:
+            raise RuntimeError(
+                f"block_cp requires DSA_TOPK={expected_topk} for block={block_size} and "
+                f"routed_blocks={routed_blocks}, got {config.dsa_indexer_topk}"
+            )
+        cp_size = int(getattr(config, "context_parallel_size", 1))
+        if args.seq_length % (2 * cp_size * block_size):
+            raise RuntimeError(
+                f"seq_length={args.seq_length} must be divisible by "
+                f"2*CP*block={2 * cp_size * block_size}"
+            )
+        max_seq = int(os.environ.get("DSA_CP_MAX_SEQ", "524288"))
+        if args.seq_length > max_seq and os.environ.get("DSA_ALLOW_LONGER_CP", "0") != "1":
+            raise RuntimeError(
+                f"seq_length={args.seq_length} exceeds validated block_cp cap {max_seq}"
+            )
+        if int(getattr(config, "pipeline_model_parallel_size", 1)) != 1:
+            raise RuntimeError("the 512K block_cp gate is validated only with pipeline size 1")
+        if getattr(config, "recompute_granularity", None) != "full":
+            raise RuntimeError("block_cp requires --recompute-granularity full")
+        if getattr(config, "recompute_method", None) != "uniform":
+            raise RuntimeError("block_cp requires --recompute-method uniform")
+        if os.environ.get("DSA_RECALL_LOG", "0") == "1":
+            raise RuntimeError("DSA_RECALL_LOG must be disabled for block_cp")
+        print_rank_0(
+            "DSA block_cp guard: "
+            f"seq={args.seq_length} cp={cp_size} block={block_size} "
+            f"routed_blocks={routed_blocks} topk={expected_topk} max_seq={max_seq}"
+        )
+
     pattern = os.environ.get("DSA_PATTERN", DEFAULT_PATTERN).upper()
     if len(pattern) != config.num_layers:
         raise RuntimeError(
@@ -95,7 +132,8 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
         )
     spec = get_gqa_dsa_block_spec(TESpecProvider(), pattern, qk_layernorm=args.qk_layernorm)
     print_rank_0(f"DSA pattern ({pattern.count('S')}/{len(pattern)} sparse): {pattern} "
-                 f"| topk={config.dsa_indexer_topk} sparse={config.dsa_indexer_use_sparse_loss}")
+                 f"| router={router} topk={config.dsa_indexer_topk} "
+                 f"sparse={config.dsa_indexer_use_sparse_loss}")
 
     model = GPTModel(
         config=config, transformer_layer_spec=spec, vocab_size=args.padded_vocab_size,

@@ -16,18 +16,19 @@ import triton.language as tl
 
 @triton.jit
 def _sparse_attn_fwd(
-    Q, K, V, TOPK, Out, Lse,
+    Q, K, V, TOPK, QPOS, Out, Lse,
     sq, skv, k, scale,
     sqb_q, snp_q, sd_q,          # Q strides: [sq, (b*np folded), hn] -> we pass per-(b,np) base
     sk_k, sd_k,                  # K strides along skv and hn (per (b,np) base)
     sk_v, sd_v,                  # V strides
-    st_sq, st_k,                 # TOPK strides along sq and k (per b base; shared across np)
+    st_sq, st_k, sqp,            # TOPK strides and global-query-position stride
     so_sq, so_d,                 # Out strides
     BLOCK_M: tl.constexpr, BLOCK_K: tl.constexpr, HN: tl.constexpr,
 ):
     # One program per query.  Earlier [M,K,D] broadcasts produced incorrect
     # reductions with ROCm Triton 3.2; [K,D] is both simpler and auditable.
     query_id = tl.program_id(0)
+    query_position = tl.load(QPOS + query_id * sqp)
     offs_d = tl.arange(0, HN)
     q = tl.load(Q + query_id * sqb_q + offs_d * sd_q).to(tl.float32)
 
@@ -43,7 +44,7 @@ def _sparse_attn_fwd(
             mask=k_mask,
             other=-1,
         )
-        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_id)
+        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_position)
         safe_idx = tl.maximum(idx, 0)
         kptr = K + safe_idx[:, None] * sk_k + offs_d[None, :] * sd_k
         kblk = tl.load(kptr, mask=valid[:, None], other=0.0).to(tl.float32)
@@ -63,7 +64,16 @@ def _sparse_attn_fwd(
     tl.store(Lse + query_id, m_i + tl.log(l_i))
 
 
-def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=1, BLOCK_K=32):
+def sparse_attn_forward(
+    query,
+    key,
+    value,
+    topk_indices,
+    scale,
+    BLOCK_M=1,
+    BLOCK_K=32,
+    query_positions=None,
+):
     sq, b, np, hn = query.shape
     skv, kb, ng, khn = key.shape
     if value.shape[:3] != (skv, b, ng):
@@ -77,6 +87,14 @@ def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=1, BLOCK
         raise ValueError(f"query heads ({np}) must be divisible by KV heads ({ng})")
     if topk_indices.shape[:2] != (b, sq):
         raise ValueError(f"top-k shape {topk_indices.shape} does not match batch/query {(b, sq)}")
+    if query_positions is None:
+        query_positions = torch.arange(sq, device=query.device, dtype=torch.int64)
+    if query_positions.shape != (sq,) or query_positions.device != query.device:
+        raise ValueError(
+            f"query_positions must be [{sq}] on {query.device}, got "
+            f"shape={query_positions.shape} device={query_positions.device}"
+        )
+    query_positions = query_positions.contiguous()
     heads_per_group = np // ng
     k = topk_indices.shape[-1]
     out = torch.empty(sq, b, np, hn, device=query.device, dtype=query.dtype)
@@ -87,12 +105,12 @@ def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=1, BLOCK
             q = query[:, bi, hi]; kk = key[:, bi, gi]; vv = value[:, bi, gi]
             o = out[:, bi, hi]; ti = topk_indices[bi]
             _sparse_attn_fwd[(sq,)](
-                q, kk, vv, ti, o, lse[bi, hi],
+                q, kk, vv, ti, query_positions, o, lse[bi, hi],
                 sq, skv, k, scale,
                 q.stride(0), 0, q.stride(1),
                 kk.stride(0), kk.stride(1),
                 vv.stride(0), vv.stride(1),
-                ti.stride(0), ti.stride(1),
+                ti.stride(0), ti.stride(1), query_positions.stride(0),
                 o.stride(0), o.stride(1),
                 BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, HN=hn,
             )
@@ -101,15 +119,16 @@ def sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M=1, BLOCK
 
 @triton.jit
 def _sparse_attn_bwd(
-    Q, K, V, TOPK, DO, Lse, DQ, DK, DV,
+    Q, K, V, TOPK, QPOS, DO, Lse, DQ, DK, DV,
     sq, skv, k, scale,
     sq_q, sd_q, sdo_q, sdo_d,
     sk_k, sd_k, sk_v, sd_v,
     sdq_q, sdq_d, sdk_k, sdk_d, sdv_k, sdv_d,
-    st_sq, st_k,
+    st_sq, st_k, sqp,
     BLOCK_M: tl.constexpr, BLOCK_K: tl.constexpr, HN: tl.constexpr,
 ):
     query_id = tl.program_id(0)
+    query_position = tl.load(QPOS + query_id * sqp)
     offs_d = tl.arange(0, HN)
     q = tl.load(Q + query_id * sq_q + offs_d * sd_q).to(tl.float32)
     do = tl.load(DO + query_id * sdo_q + offs_d * sdo_d).to(tl.float32)
@@ -119,7 +138,7 @@ def _sparse_attn_bwd(
     for j0 in range(0, k, BLOCK_K):
         offs_k = j0 + tl.arange(0, BLOCK_K); k_mask = offs_k < k
         idx = tl.load(TOPK + query_id * st_sq + offs_k * st_k, mask=k_mask, other=-1)
-        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_id)
+        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_position)
         safe_idx = tl.maximum(idx, 0)
         kb = tl.load(K + safe_idx[:, None] * sk_k + offs_d[None, :] * sd_k, mask=valid[:, None], other=0.0).to(tl.float32)
         vb = tl.load(V + safe_idx[:, None] * sk_v + offs_d[None, :] * sd_v, mask=valid[:, None], other=0.0).to(tl.float32)
@@ -131,7 +150,7 @@ def _sparse_attn_bwd(
         offs_k = j0 + tl.arange(0, BLOCK_K)
         k_mask = offs_k < k
         idx = tl.load(TOPK + query_id * st_sq + offs_k * st_k, mask=k_mask, other=-1)
-        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_id)
+        valid = k_mask & (idx >= 0) & (idx < skv) & (idx <= query_position)
         safe_idx = tl.maximum(idx, 0)
         kblk = tl.load(K + safe_idx[:, None] * sk_k + offs_d[None, :] * sd_k, mask=valid[:, None], other=0.0).to(tl.float32)
         vblk = tl.load(V + safe_idx[:, None] * sk_v + offs_d[None, :] * sd_v, mask=valid[:, None], other=0.0).to(tl.float32)
@@ -149,16 +168,27 @@ def _sparse_attn_bwd(
 
 class _SparseDSA(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K):
-        out, lse = sparse_attn_forward(query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K)
-        ctx.save_for_backward(query, key, value, topk_indices, out, lse)
+    def forward(
+        ctx, query, key, value, topk_indices, query_positions, scale, BLOCK_M, BLOCK_K
+    ):
+        out, lse = sparse_attn_forward(
+            query,
+            key,
+            value,
+            topk_indices,
+            scale,
+            BLOCK_M,
+            BLOCK_K,
+            query_positions,
+        )
+        ctx.save_for_backward(query, key, value, topk_indices, query_positions, out, lse)
         ctx.scale = scale; ctx.blocks = (BLOCK_M, BLOCK_K)
         sq, b, np, hn = query.shape
         return out.reshape(sq, b, np * hn)
 
     @staticmethod
     def backward(ctx, dout):
-        query, key, value, topk_indices, out, lse = ctx.saved_tensors
+        query, key, value, topk_indices, query_positions, out, lse = ctx.saved_tensors
         sq, b, np, hn = query.shape
         skv, _, ng, _ = key.shape
         heads_per_group = np // ng
@@ -176,17 +206,38 @@ class _SparseDSA(torch.autograd.Function):
                 dks, dvs = dk[:, bi, gi], dv[:, bi, gi]
                 ti = topk_indices[bi]
                 _sparse_attn_bwd[(sq,)](
-                    qs, ks, vs, ti, dos, lse[bi, hi], dqs, dks, dvs,
+                    qs, ks, vs, ti, query_positions, dos, lse[bi, hi], dqs, dks, dvs,
                     sq, skv, k, scale,
                     qs.stride(0), qs.stride(1), dos.stride(0), dos.stride(1),
                     ks.stride(0), ks.stride(1), vs.stride(0), vs.stride(1),
                     dqs.stride(0), dqs.stride(1), dks.stride(0), dks.stride(1),
                     dvs.stride(0), dvs.stride(1), ti.stride(0), ti.stride(1),
+                    query_positions.stride(0),
                     BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K, HN=hn,
                 )
-        return dq, dk.to(key.dtype), dv.to(value.dtype), None, None, None, None
+        return dq, dk.to(key.dtype), dv.to(value.dtype), None, None, None, None, None
 
 
-def triton_dsa_attn(query, key, value, topk_indices, scale, BLOCK_M=1, BLOCK_K=32):
-    """Drop-in for unfused_dsa_fn (differentiable). query[sq,b,np,hn] ... -> [sq,b,np*hn]."""
-    return _SparseDSA.apply(query, key, value, topk_indices, scale, BLOCK_M, BLOCK_K)
+def triton_dsa_attn(
+    query,
+    key,
+    value,
+    topk_indices,
+    scale,
+    BLOCK_M=1,
+    BLOCK_K=32,
+    query_positions=None,
+):
+    """Differentiable native-GQA sparse attention with global causal positions."""
+    if query_positions is None:
+        query_positions = torch.arange(query.shape[0], device=query.device, dtype=torch.int64)
+    return _SparseDSA.apply(
+        query,
+        key,
+        value,
+        topk_indices,
+        query_positions,
+        scale,
+        BLOCK_M,
+        BLOCK_K,
+    )

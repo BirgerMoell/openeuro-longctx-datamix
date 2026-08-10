@@ -1,10 +1,12 @@
 # OpenEuroLLM DeepSeek Sparse Attention work
 
-**Status date:** 2026-07-28
+**Status date:** 2026-08-10
 **Scope:** OpenEuroLLM 9B GQA long-context research on LUMI
 **Canonical implementation:** `scripts/dsa/` in this repository
-**Current verdict:** the DSA mechanism and both gradient paths are correct at 8K. It is not yet
-ready for sustained sparse adaptation, context parallelism, 512K–2M training, or sparse decoding.
+**Current verdict:** the DSA mechanism and both gradient paths are correct at 8K. A standalone,
+fail-closed 512K/CP16 training candidate is implemented and passes CPU/layout/autograd tests. It
+still requires the staged 8K save/reload and 64K/CP2 GPU gates before the 512K job is submitted.
+The current full-K/V CP gather is a 512K correctness bridge, not the final 1M–2M transport.
 
 ## Executive summary
 
@@ -18,11 +20,17 @@ We have moved beyond a toy sparse-attention mask:
   main model through sparse attention, while selected-set KL trains a detached indexer.
 - A one-step full-model integration gate loaded the warm checkpoint and produced finite LM loss,
   indexer loss, and nonzero gradients in both parameter families.
+- A hierarchical `block_cp` router now keeps the causal current 256-token block and selects one
+  learned earlier global block (512 retained slots total) without an L×L indexer matrix.
+- Differentiable CP all-gather restores Megatron's zig-zag shards to canonical global token order;
+  Triton forward and backward use each query's global causal position.
+- Three launch gates exercise 8K/CP1, 64K/CP2, and 512K/CP16. Each saves full training state and
+  reloads it in a fresh Python process before a second update.
 - Unsupported combinations fail closed instead of silently falling back to a wrong or dense path.
 
-This proves the 8K training mechanism. It does **not** prove that the current implementation scales
-to a million tokens. Core sparse attention is O(Lk), but the exact indexer still performs O(L²)
-arithmetic. Context-parallel global selection and inference are not implemented.
+The 8K mechanism is proven; the new distributed path is implemented but not yet GPU-integrated.
+It does **not** prove million-token efficiency. The 512K bridge replicates global K/V and indexer
+K on every CP rank, and selected-set state is still B×local-L×k. Sparse decoding is not implemented.
 
 ## Why DSA
 
@@ -37,8 +45,9 @@ and selects the causal top-k keys. The model's original Q/K/V attention is then 
 those selected positions. The indexer chooses positions; it does not replace the model's content
 attention.
 
-For this model, k=2048 is a useful first target. At 8K it retains 25% of the prefix and is mainly a
-correctness/adaptation test. At 1M it would retain about 0.2%, where sparsity becomes material.
+The exact 8K oracle used k=2048. The 512K bridge uses k=512: the current 256-token block plus one
+learned earlier 256-token block. This is deliberately a pipeline/correctness experiment, not yet a
+claim that two blocks preserve enough attention mass for quality.
 
 ## The two training phases
 
@@ -78,6 +87,11 @@ At runtime, `scripts/dsa` is placed before the Megatron checkout on `PYTHONPATH`
 4. `dsa_patches.py` installs the validated sparse selection, selected-set KL, recall logging, and
    Triton core against Megatron's experimental DSA interfaces.
 
+The launcher uses `python -m pretrain_gpt`. Directly executing `$MEG/pretrain_gpt.py` puts the
+Megatron directory at `sys.path[0]` and can silently import Megatron's dense `gpt_builders.py`
+instead of this overlay. The preflight checks both resolved module origins before allocating model
+state; this exact shadowing error caused the failed historical save attempt 20344682.
+
 This keeps the work reviewable and reproducible without carrying a private Megatron tree. It also
 makes the dependency boundary visible. The validated LUMI checkout was clean at
 `b359462c12858cedd2238a22eca0dca7aa6b8872`; `scripts/dsa/MEGATRON_REVISION` pins it and the
@@ -104,16 +118,20 @@ harder without solving the remaining algorithmic gaps.
 ```mermaid
 flowchart LR
     H["Hidden states"] --> IX["Lightning indexer"]
-    IX --> TOPK["Exact causal blocked top-k"]
-    TOPK --> POS["Selected positions"]
+    IX --> ROUTE["Switchable router"]
+    ROUTE --> FLAT["flat_exact (8K oracle)"]
+    ROUTE --> BLOCK["block_cp (current + learned earlier block)"]
+    FLAT --> TOPK["Selected global positions"]
+    BLOCK --> TOPK
 
     H --> QKV["Original GQA Q/K/V"]
-    POS --> SA["Native-GQA Triton sparse attention"]
-    QKV --> SA
+    QKV --> CPG["Differentiable CP global K/V gather"]
+    TOPK --> SA["Native-GQA Triton sparse attention"]
+    CPG --> SA
     SA --> LM["LM loss"]
     LM --> MAIN["Main-model gradients"]
 
-    POS --> KL["Selected-set KL"]
+    TOPK --> KL["Selected-set KL"]
     QKV -->|"Q/K detached"| KL
     KL --> IDX["Indexer gradients"]
 ```
@@ -123,11 +141,15 @@ Important properties:
 - all 36 layers default to sparse-capable (`S`) blocks;
 - K/V remain 8 native GQA groups for 32 query heads;
 - the indexer uses non-interleaved RoPE, matching DeepSeek's corrected convention;
-- selection is exactly causal and uses int32 indices with `-1` sentinels;
-- full score-matrix allocation is avoided by query/key blocking;
+- selection is globally causal and uses int32 indices with `-1` sentinels;
+- `flat_exact` avoids the full matrix allocation but remains O(L²) arithmetic;
+- `block_cp` uses 256-token blocks, routes from the first query in each block to avoid future-token
+  leakage, and guarantees that the causal portion of the current block is retained;
+- Megatron CP rank order is explicitly reversed into global token order, with summed gradients on
+  the backward collective;
 - selected-set retention is guarded by `DSA_MAX_RETAINED_SELECTION_BYTES`;
-- packed sequences, attention bias, non-causal masks, unequal query/key lengths, and CP>1 fail
-  closed in the current sparse path.
+- packed sequences, attention bias, non-causal masks, PP>1 for the 512K gate, misaligned block/CP
+  layouts, and contexts above the validated 524288 cap fail closed.
 
 ## Evidence from LUMI
 
@@ -206,50 +228,51 @@ non-interleaved indexer convention.
 | Native-GQA sparse core | Validated at small/8K scale | ROCm Triton fwd/bwd and integration gate |
 | Dual LM + selected-KL gradients | Validated for one step | Job 20336946 |
 | Sustained sparse adaptation | Not run | Next quality gate |
-| Sparse checkpoint save/reload | Not validated | Must follow a multi-step run |
-| Context parallelism | Not implemented | Needs distributed global top-k and KV exchange |
-| 128K+ memory behavior | Not validated | Selection/KL retention and indexer cost |
-| 512K–2M training | Blocked | CP plus scalable indexer/KL required |
+| Sparse checkpoint save/reload | Implemented, GPU gate pending | 8K round-trip launcher |
+| Context parallelism | Implemented, GPU gate pending | Zig-zag gather/autograd CPU tests; CP2 next |
+| Hierarchical candidate generation | Implemented, quality unmeasured | 256-token current + 1 routed block |
+| 128K+ memory behavior | Not validated | 64K/CP2 keeps final 32K local length and is the memory gate |
+| 512K training | Prepared, gated | Run only after 8K and 64K round trips pass |
+| 1M–2M training | Blocked | Replace replicated global K/V and reduce/stream selected state |
 | Sparse prefill | Not implemented | Current path assumes aligned full self-attention |
 | Sparse decode / KV cache | Not implemented | Needs paged cache and q-length-1 kernels |
 | HF export and serving | Not implemented | Requires architecture/config and runtime support |
 
 ## Remaining build work
 
-### P0 — prove trainability before scaling
+### P0 — execute the prepared correctness ladder
 
-1. Run 100–500 sparse-adaptation steps at 8K with all 36 `S` layers, k=2048, TP=8, CP=1,
-   selected-set KL on, and both gradient probes.
-2. Save intermediate and final checkpoints; reload one and continue for several steps.
-3. Compare dense and sparse loss/logits on fixed held-out batches before and after adaptation.
-4. Measure short-context retention plus long-context retrieval (NIAH/RULER-style) against the
-   dense 256K model.
-5. Record separate indexer, selection, sparse-core, KL, and optimizer timings.
-6. Define explicit stop gates for NaNs, zero gradient family, recall collapse, short-context
-   regression, or checkpoint mismatch.
+1. Run `dsa_sparse_8k_roundtrip.sbatch`: GPU dense-reference tests, two-rank RCCL gather test,
+   update 301, full checkpoint, fresh-process reload, update 302.
+2. If and only if that passes, run `dsa_sparse_64k_cp2_roundtrip.sbatch`. Its CP-local length is
+   32K, matching the final CP16 topology, so it is the cheap communication/memory gate.
+3. If and only if that passes, run `dsa_sparse_512k_cp16_roundtrip.sbatch` on 16 nodes. Success
+   requires finite LM/indexer losses and both gradient probes plus complete iterations 301/302.
+4. Compare dense and sparse loss/logits on fixed held-out batches before any sustained run.
+5. Only then choose a longer adaptation schedule and evaluate short-context retention and
+   NIAH/RULER-style retrieval against the dense 256K model.
 
 ### P1 — make long training possible
 
-#### Context-parallel global top-k
+#### Replace the correctness-first CP transport
 
-The current code intentionally rejects CP>1. Correct CP requires:
+The current `block_cp` implementation is correct-by-construction for the prepared layout:
 
-1. compute local candidate scores using global causal positions;
-2. select a deterministic local top-k on each sequence shard;
-3. merge candidates into an exact or explicitly approximate global top-k;
-4. fetch/exchange the selected K/V rows;
-5. propagate gradients through the chosen distributed data movement; and
-6. test equality against CP=1 for small sequences, including ties and checkpoint resume.
+1. indexer K and main-model K/V are differentiably gathered across CP;
+2. rank-order zig-zag chunks are restored to canonical global order;
+3. the learned router selects globally indexed earlier blocks;
+4. forward and backward causality use the local query's global position; and
+5. collective backward sums contributions before returning each source rank's local gradient.
 
-Without this, simply setting `--context-parallel-size` produces wrong selection or hidden dense
-work.
+This replicates roughly 128 MiB each of BF16 K, V, and indexer K per TP rank at 512K (before
+gradients/workspace). It is acceptable for the bounded 512K test, but 1M–2M should exchange only
+block summaries and selected K/V rows rather than replicate the full sequence.
 
 #### Stream or recompute the selected-set KL
 
-Exact blocked selection avoids an L×L score tensor, but it currently returns scores and int32
-indices of shape B×L×k. At L=1,048,576 and k=2048, fp32 scores plus int32 indices are about 16 GiB
-per layer before other activations. The default 2 GiB safety guard therefore refuses roughly
-beyond 131K tokens at batch one and k=2048.
+The CP-local selected scores and int32 indices have shape B×(L/CP)×k. At the prepared 512K/CP16,
+k=512 configuration this is about 128 MiB per rank before recomputation effects. At 1M–2M or with
+larger k, stream or recompute query blocks rather than retain the whole local selected set.
 
 We need a fused or streamed design that consumes query blocks, computes sparse attention and KL,
 and releases selected scores/indices before processing the next block. Activation recomputation
@@ -257,10 +280,10 @@ may further reduce retained state.
 
 #### Replace the exact O(L²) indexer when needed
 
-Blocking fixes peak score memory, not arithmetic. Before 512K–2M, benchmark the indexer separately.
-If it dominates, introduce a tested candidate-generation hierarchy (for example coarse blocks then
-fine token selection) with an exact-path oracle and recall/quality gates. Approximation must be an
-explicit experiment, not a silent replacement.
+`block_cp` removes the flat O(L²) token scorer, but its coarse route (one earlier block chosen from
+global block summaries) is an explicit approximation. Benchmark it against `flat_exact` at 8K,
+measure attention-mass recall and retrieval quality, then evaluate more routed blocks or a
+coarse-to-fine token selector. Approximation must remain a named router, never a silent fallback.
 
 ### P1 — implement inference
 
@@ -289,23 +312,26 @@ a drop-in match for this GQA model.
 
 ## Recommended sequence of experiments
 
-1. **8K sustained gate:** 100–500 steps, save/reload, dense-vs-sparse quality check.
-2. **16K/32K kernel gate:** characterize memory and time; keep CP=1.
-3. **CP correctness gate:** CP=2 then CP=4 on small sequences, exact comparison with CP=1.
-4. **64K/128K adaptation:** progressive context and data mixture; validate retrieval and
-   short-context retention.
-5. **Streamed KL/indexer gate:** remove the B×L×k retained-state bottleneck.
-6. **256K/512K training:** only after CP and memory gates pass.
+1. **8K round trip:** GPU oracle + RCCL collective + save/reload.
+2. **64K/CP2 round trip:** same 32K local sequence as the final job.
+3. **512K/CP16 round trip:** two sparse updates with a full checkpoint boundary.
+4. **Quality gate:** dense-vs-sparse loss/logits, attention-mass recall, retrieval, and short-context
+   retention before sustained adaptation.
+5. **Sustained 512K adaptation:** select schedule only from measured step time and quality.
+6. **Selected-row CP transport + streamed KL:** required before 1M–2M.
 7. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
 8. **Inference track:** sparse prefill and decode must pass independently before publishing a
    practically usable sparse model.
 
-No 512K sparse job should be submitted from the archived `sparse_512k.sbatch`. It is deliberately
-fail-closed because it combines unsupported CP with an obsolete sparse-loss configuration.
+Never submit the archived `sparse_512k.sbatch`; it sets `DSA_SPARSE=0` and is not sparse training.
+The only prepared 512K launcher is `dsa_sparse_512k_cp16_roundtrip.sbatch`, and it is gated behind
+successful 8K and 64K round trips plus an explicit user go-ahead.
 
 ## Source map
 
 - `scripts/dsa/chunked_indexer.py` — exact causal blocked top-k and retention guard
+- `scripts/dsa/hierarchical_indexer.py` — causal current-block + learned earlier-block router
+- `scripts/dsa/cp_utils.py` — Megatron zig-zag global reorder and differentiable CP gather
 - `scripts/dsa/MEGATRON_REVISION` — validated external Megatron commit
 - `scripts/dsa/dsa_sparse_loss.py` — native-GQA selected-set KL
 - `scripts/dsa/dsa_patches.py` — sparse path, fail-closed checks, recall logging
@@ -313,7 +339,9 @@ fail-closed because it combines unsupported CP with an obsolete sparse-loss conf
 - `scripts/dsa/megatron_gqa_dsa.py` — Megatron GQA DSA module specifications
 - `scripts/dsa/gpt_builders_dsa.py` — config bridge, checkpoint loading, gradient probes
 - `scripts/dsa/test_dsa_correctness.py` — dense-reference correctness gates
+- `scripts/dsa/test_cp_distributed.py` — multi-rank collective/autograd gate
 - `scripts/dsa/lumi/dsa_sparse_8k_correctness.sbatch` — reproducible one-step LUMI gate
+- `scripts/dsa/lumi/dsa_sparse_{8k,64k_cp2,512k_cp16}_roundtrip.sbatch` — gated save/reload ladder
 
 ## Primary references
 

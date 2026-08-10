@@ -8,7 +8,13 @@ import os
 import torch
 
 from chunked_indexer import chunked_topk, index_scores_block
+from cp_utils import (
+    cp_global_positions,
+    pack_global_gradient_for_cp,
+    reorder_cp_rank_gather,
+)
 from dsa_sparse_loss import selected_set_indexer_loss
+from hierarchical_indexer import hierarchical_block_topk
 
 
 class _OneRankGroup:
@@ -29,6 +35,90 @@ def _causal_indices(batch, seqlen, topk, device):
                 torch.int32
             )
     return result
+
+
+def _causal_indices_for_positions(batch, query_positions, key_length, topk, device):
+    result = torch.full(
+        (batch, query_positions.numel(), topk), -1, dtype=torch.int32, device=device
+    )
+    for bi in range(batch):
+        for qi, position in enumerate(query_positions.tolist()):
+            count = min(topk, position + 1, key_length)
+            result[bi, qi, :count] = torch.randperm(
+                min(position + 1, key_length), device=device
+            )[:count].to(torch.int32)
+    return result
+
+
+def test_cp_zigzag_layout(device):
+    cp_size, chunk = 3, 2
+    global_values = torch.arange(2 * cp_size * chunk, device=device)
+    gathered = []
+    for rank in range(cp_size):
+        positions = cp_global_positions(2 * chunk, cp_size, rank, device=device)
+        gathered.append(global_values[positions])
+    restored = reorder_cp_rank_gather(torch.stack(gathered))
+    torch.testing.assert_close(restored, global_values, rtol=0, atol=0)
+
+    packed = pack_global_gradient_for_cp(global_values, cp_size)
+    for rank in range(cp_size):
+        positions = cp_global_positions(2 * chunk, cp_size, rank, device=device)
+        torch.testing.assert_close(packed[rank], global_values[positions], rtol=0, atol=0)
+    print("PASS CP zig-zag layout: rank gather and backward packing restore global token order")
+
+
+def test_hierarchical_block_router(device):
+    torch.manual_seed(5)
+    cp_size, cp_rank, global_length, block_size = 2, 0, 16, 2
+    local_length = global_length // cp_size
+    query_positions = cp_global_positions(
+        local_length, cp_size, cp_rank, device=device
+    )
+    q = torch.randn(local_length, 1, 2, 4, device=device, requires_grad=True)
+    weights = torch.randn(local_length, 1, 2, device=device, requires_grad=True)
+    key = torch.randn(global_length, 1, 4, device=device, requires_grad=True)
+    scores, indices = hierarchical_block_topk(
+        q,
+        weights,
+        key,
+        query_positions,
+        topk=4,
+        block_size=block_size,
+        routed_blocks=1,
+    )
+    assert scores.shape == indices.shape == (1, local_length, 4)
+    assert indices.dtype == torch.int32
+    assert torch.all((indices < 0) | (indices <= query_positions.view(1, -1, 1)))
+    for row, position in enumerate(query_positions.tolist()):
+        current_start = (position // block_size) * block_size
+        expected_current = set(range(current_start, position + 1))
+        actual = set(indices[0, row][indices[0, row] >= 0].tolist())
+        assert expected_current.issubset(actual), (position, expected_current, actual)
+
+    finite = torch.where(torch.isfinite(scores), scores, torch.zeros_like(scores)).sum()
+    finite.backward()
+    for name, tensor in (("q", q), ("weights", weights), ("key", key)):
+        assert tensor.grad is not None and torch.isfinite(tensor.grad).all(), name
+        assert torch.count_nonzero(tensor.grad) > 0, name
+
+    # A later query in the first local block must not influence an earlier
+    # query's route or selected scores.
+    q_perturbed = q.detach().clone()
+    weights_perturbed = weights.detach().clone()
+    q_perturbed[1] += 1000
+    weights_perturbed[1] -= 1000
+    perturbed_scores, perturbed_indices = hierarchical_block_topk(
+        q_perturbed,
+        weights_perturbed,
+        key.detach(),
+        query_positions,
+        topk=4,
+        block_size=block_size,
+        routed_blocks=1,
+    )
+    torch.testing.assert_close(perturbed_indices[:, 0], indices[:, 0], rtol=0, atol=0)
+    torch.testing.assert_close(perturbed_scores[:, 0], scores.detach()[:, 0], rtol=0, atol=0)
+    print("PASS hierarchical router: global causal blocks, current-block guarantee, gradients")
 
 
 def test_chunked_indexer(device):
@@ -150,7 +240,9 @@ def test_selected_set_kl(device):
     )
 
 
-def _reference_sparse_attention(query, key, value, indices, scale):
+def _reference_sparse_attention(
+    query, key, value, indices, scale, query_positions=None
+):
     sq, batch, n_query_heads, _ = query.shape
     sk, _, n_kv_heads, _ = key.shape
     expanded_key = key.repeat_interleave(n_query_heads // n_kv_heads, dim=2)
@@ -162,6 +254,12 @@ def _reference_sparse_attention(query, key, value, indices, scale):
         -1, indices.clamp(min=0).long(), valid.to(torch.int32)
     )
     selection = selection_count > 0
+    if query_positions is None:
+        query_positions = torch.arange(sq, device=query.device)
+    causal = torch.arange(sk, device=query.device).view(1, 1, sk) <= query_positions.view(
+        1, sq, 1
+    )
+    selection = selection & causal
     probs = torch.softmax(logits.masked_fill(~selection.unsqueeze(1), float("-inf")), dim=-1)
     output = torch.einsum("bhqk,kbhd->qbhd", probs, expanded_value.float())
     return output.to(query.dtype).reshape(sq, batch, -1)
@@ -222,6 +320,38 @@ def test_triton_native_gqa(device):
     print("PASS Triton sparse attention: native GQA forward/backward matches dense reference")
 
 
+def test_triton_global_positions(device):
+    from triton_dsa import triton_dsa_attn
+
+    torch.manual_seed(29)
+    sq, sk, batch, n_query_heads, n_kv_heads, dim, topk = 24, 64, 1, 4, 2, 32, 12
+    query_positions = torch.arange(40, 40 + sq, device=device, dtype=torch.int64)
+    query = torch.randn(
+        sq, batch, n_query_heads, dim, device=device, dtype=torch.float32, requires_grad=True
+    )
+    key = torch.randn(
+        sk, batch, n_kv_heads, dim, device=device, dtype=torch.float32, requires_grad=True
+    )
+    value = torch.randn(
+        sk, batch, n_kv_heads, dim, device=device, dtype=torch.float32, requires_grad=True
+    )
+    indices = _causal_indices_for_positions(
+        batch, query_positions, sk, topk, device
+    )
+    scale = dim**-0.5
+    actual = triton_dsa_attn(
+        query, key, value, indices, scale, query_positions=query_positions
+    )
+    expected = _reference_sparse_attention(
+        query, key, value, indices, scale, query_positions=query_positions
+    )
+    torch.testing.assert_close(actual, expected, rtol=3e-4, atol=3e-4)
+    grads = torch.autograd.grad(actual.float().sum(), (query, key, value))
+    for name, grad in zip(("dq", "dk", "dv"), grads):
+        assert torch.isfinite(grad).all() and torch.count_nonzero(grad) > 0, name
+    print("PASS Triton global causality: CP-local queries attend through global positions")
+
+
 def test_noninterleaved_rope(device):
     try:
         from megatron.core.models.common.embeddings.rope_utils import (
@@ -269,12 +399,15 @@ def main():
 
     test_chunked_indexer(device)
     test_selection_retention_guard(device)
+    test_cp_zigzag_layout(device)
+    test_hierarchical_block_router(device)
     test_selected_set_kl(device)
     rope_tested = test_noninterleaved_rope(device)
     if args.require_megatron_rope and not rope_tested:
         raise AssertionError("Megatron is required for the non-interleaved RoPE gate")
     if device.type == "cuda":
         test_triton_native_gqa(device)
+        test_triton_global_positions(device)
     print("ALL DSA CORRECTNESS TESTS PASSED")
 
 

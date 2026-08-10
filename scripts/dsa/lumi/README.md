@@ -24,9 +24,15 @@ lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/
 |---|---|---|
 | `dsa_warmup_failclosed.sbatch` | Frozen-base, all-layer 8K indexer warm-up | Validated; job 20291047 completed 300 steps |
 | `dsa_sparse_8k_correctness.sbatch` | One-step sparse update with selected-set KL and dual-gradient probes | Validated recipe; source of job 20336946 |
-| `dsa_sparse_8k_sustained.sbatch` | Resumable 500-update sparse-adaptation gate from warm iteration 300 | Current next-stage launcher; checkpoints every 50 updates |
+| `dsa_sparse_8k_sustained.sbatch` | Resumable 500-update sparse adaptation | Deferred quality gate; do not run before round trips |
+| `dsa_sparse_8k_roundtrip.sbatch` | GPU/RCCL tests, sparse update, full save, fresh-process reload | Prepared; first approval gate |
+| `dsa_sparse_64k_cp2_roundtrip.sbatch` | Two-node CP2 round trip at 32K local tokens/rank | Prepared; run only after 8K passes |
+| `dsa_sparse_512k_cp16_roundtrip.sbatch` | 16-node CP16 512K round trip | Prepared; run only after 8K and 64K pass |
 | `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
 
-The current sparse path supports TP=8 but deliberately rejects CP>1. Do not start 512K–2M sparse
-training until distributed global top-k, selected-K/V exchange, and streamed selected-set KL have
-their own correctness gates. See [the canonical DSA overview](../../../docs/sparse_attention_dsa.md).
+The round-trip scripts use the standalone `block_cp` overlay: global zig-zag reorder, differentiable
+K/V gather, a 256-token current block plus one learned earlier block, global-position Triton
+causality, selected-set KL, and dual-gradient probes. Every script starts a fresh Python process to
+reload model+optimizer+RNG before the second update. There are no blind retries. This full-K/V
+gather is capped at 512K; 1M–2M still requires selected-row exchange and streamed/recomputed state.
+See [the canonical DSA overview](../../../docs/sparse_attention_dsa.md).
