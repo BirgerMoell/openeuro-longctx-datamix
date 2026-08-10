@@ -12,6 +12,7 @@ CONTAINER=${CONTAINER:-/scratch/project_465002530/users/bmoell/containers/laif-r
 BIND_DIRS=${BIND_DIRS:-/pfs,/scratch,/projappl,/project,/flash,/appl,/opt/cray,/var/spool/slurmd}
 DATA_BLEND_FILE=${DATA_BLEND_FILE:?}
 DATA_CACHE_PATH=${DATA_CACHE_PATH:-$EXT/cache_dsa_sparse_${SEQ_LENGTH}}
+MID_LEVEL_DATASET_SURPLUS=${MID_LEVEL_DATASET_SURPLUS:-0.5}
 INNER=$DSADIR/lumi/dsa_sparse_train_inner.sh
 
 for required in "$DSADIR/gpt_builders.py" "$DSADIR/MEGATRON_REVISION" \
@@ -47,13 +48,15 @@ export DSA_CP_MAX_SEQ=524288 DSA_ALLOW_LONGER_CP=0
 export DSA_GRAD_PROBE=1 DSA_RECALL_LOG=0 DSA_KL_Q_BLOCK=128
 export DSA_REQUIRE_NON_INTERLEAVED_ROPE=1 DSA_RESUME=1 DSA_LOAD_BASE=""
 export MEG EXT OUT DATA_BLEND_FILE DATA_CACHE_PATH SEQ_LENGTH CP_SIZE ROTARY_BASE
+export MID_LEVEL_DATASET_SURPLUS
 export TOKENIZER_PATH=$TOK
 
 singularity exec -B "$DSADIR" -B "$EXT" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
   "export PYTHONPATH=$DSADIR:$MEG:\${PYTHONPATH:-}; python3 $DSADIR/lumi/preflight_sparse.py \
     --dsa-dir $DSADIR --megatron-root $MEG --warm-checkpoint $WARM \
     --data-blend $DATA_BLEND_FILE --seq-length $SEQ_LENGTH --cp-size $CP_SIZE \
-    --block-size $DSA_BLOCK_SIZE --routed-blocks $DSA_ROUTED_BLOCKS --topk $DSA_TOPK"
+    --block-size $DSA_BLOCK_SIZE --routed-blocks $DSA_ROUTED_BLOCKS --topk $DSA_TOPK \
+    --mid-level-dataset-surplus $MID_LEVEL_DATASET_SURPLUS"
 
 if [ "${RUN_GPU_TESTS:-0}" = "1" ]; then
   echo "##### GPU dense-reference and 2-rank RCCL gates"

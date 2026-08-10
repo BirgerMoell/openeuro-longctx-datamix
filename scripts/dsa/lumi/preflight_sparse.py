@@ -5,6 +5,7 @@ import argparse
 import importlib
 import importlib.util
 import json
+import math
 from pathlib import Path
 import subprocess
 
@@ -50,10 +51,25 @@ def validate_training_launcher(path: Path):
             "legacy --recompute-activations overrides full recompute with selective: "
             f"{path}"
         )
-    required = ("--recompute-granularity full", "--recompute-method uniform")
+    required = (
+        "--recompute-granularity full",
+        "--recompute-method uniform",
+        "--mid-level-dataset-surplus",
+    )
     missing = [fragment for fragment in required if fragment not in text]
     if missing:
-        raise RuntimeError(f"training launcher is missing full recompute args {missing}: {path}")
+        raise RuntimeError(f"training launcher is missing required args {missing}: {path}")
+
+
+def validate_mid_level_dataset_surplus(value: float):
+    # The 512K/CP16 production mixture requested 66 samples from a mid-level
+    # dataset for which the default 0.5% margin built only 51.  Require a 50%
+    # margin so the known ~30% deficit cannot recur silently.
+    if not math.isfinite(value) or value < 0.5:
+        raise RuntimeError(
+            "mid-level dataset surplus must be finite and at least 0.5 for the "
+            f"512K mixture, got {value}"
+        )
 
 
 def main():
@@ -67,6 +83,7 @@ def main():
     parser.add_argument("--block-size", type=int, required=True)
     parser.add_argument("--routed-blocks", type=int, required=True)
     parser.add_argument("--topk", type=int, required=True)
+    parser.add_argument("--mid-level-dataset-surplus", type=float, required=True)
     args = parser.parse_args()
 
     expected_revision = (args.dsa_dir / "MEGATRON_REVISION").read_text().strip()
@@ -98,6 +115,7 @@ def main():
     complete_checkpoint(args.warm_checkpoint, 300)
     pairs = validate_data_blend(args.data_blend)
     validate_training_launcher(args.dsa_dir / "lumi" / "dsa_sparse_train_inner.sh")
+    validate_mid_level_dataset_surplus(args.mid_level_dataset_surplus)
     if args.seq_length % (2 * args.cp_size * args.block_size):
         raise RuntimeError("sequence length is not aligned to Megatron CP halves and DSA blocks")
     expected_topk = args.block_size * (1 + args.routed_blocks)
@@ -113,6 +131,7 @@ def main():
                 "megatron_revision": actual_revision,
                 "source_checkpoint": str(args.warm_checkpoint),
                 "data_pairs": pairs,
+                "mid_level_dataset_surplus": args.mid_level_dataset_surplus,
                 "seq_length": args.seq_length,
                 "cp_size": args.cp_size,
                 "cp_local_length": args.seq_length // args.cp_size,

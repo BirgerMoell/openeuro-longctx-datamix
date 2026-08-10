@@ -253,6 +253,14 @@ non-interleaved indexer convention.
 5. Only then choose a longer adaptation schedule and evaluate short-context retention and
    NIAH/RULER-style retrieval against the dense 256K model.
 
+The first 512K attempt, job `20938985`, stopped before its first forward pass when Megatron's
+top-level blend requested 66 samples from a mid-level component for which the default 0.5% sample
+surplus had built only 51.  The round-trip driver now exports a 50% mid-level dataset surplus, the
+training launcher passes it explicitly through `--mid-level-dataset-surplus`, and preflight rejects
+smaller or non-finite values.  This changes only the number of cached sample indices available to
+the deterministic top-level blend; it does not change the published data weights or training
+examples selected by that blend.
+
 ### 8K round-trip result (2026-08-10)
 
 LUMI job `20927044` completed in 16:41 with exit `0:0` from immutable overlay commit `a8e3551`.

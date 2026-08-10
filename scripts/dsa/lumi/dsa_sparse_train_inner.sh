@@ -5,6 +5,7 @@ set -euo pipefail
 : "${DSADIR:?}" "${MEG:?}" "${EXT:?}" "${LOAD_DIR:?}" "${OUT:?}"
 : "${DATA_BLEND_FILE:?}" "${DATA_CACHE_PATH:?}" "${SEQ_LENGTH:?}" "${CP_SIZE:?}"
 : "${ROTARY_BASE:?}" "${TARGET_ITER:?}" "${TOKENIZER_PATH:?}"
+: "${MID_LEVEL_DATASET_SURPLUS:?}"
 
 export RANK=${RANK:-${SLURM_PROCID:?}} LOCAL_RANK=${LOCAL_RANK:-${SLURM_LOCALID:?}}
 export PYTHONPATH="$DSADIR:$MEG:${PYTHONPATH:-}"
@@ -61,6 +62,7 @@ exec python3 -u -m pretrain_gpt \
   --no-gradient-accumulation-fusion --no-bias-dropout-fusion --no-rope-fusion \
   --overlap-grad-reduce --distributed-timeout-minutes 30 \
   --data-path "${DATA_ARGS[@]}" --data-cache-path "$DATA_CACHE_PATH" --split 100,0,0 \
+  --mid-level-dataset-surplus "$MID_LEVEL_DATASET_SURPLUS" \
   --tokenizer-type HuggingFaceTokenizer --tokenizer-model "$TOKENIZER_PATH" \
   --make-vocab-size-divisible-by 128 --dataloader-type cyclic --num-workers 1 \
   --ckpt-format torch_dist "${LOAD_ARGS[@]}" --save "$OUT" --save-interval "$TARGET_ITER" \
