@@ -1,12 +1,13 @@
 # OpenEuroLLM DeepSeek Sparse Attention work
 
-**Status date:** 2026-08-10
+**Status date:** 2026-08-11
 **Scope:** OpenEuroLLM 9B GQA long-context research on LUMI
 **Canonical implementation:** `scripts/dsa/` in this repository
-**Current verdict:** the DSA mechanism and both gradient paths are correct at 8K. A standalone,
-fail-closed 512K/CP16 training candidate is implemented and passes CPU/layout/autograd tests. It
-still requires the staged 8K save/reload and 64K/CP2 GPU gates before the 512K job is submitted.
-The current full-K/V CP gather is a 512K correctness bridge, not the final 1M–2M transport.
+**Current verdict:** the fail-closed DSA path now passes save/reload gates at 8K/CP1, 64K/CP2,
+and 512K/CP16. Job `20996514` completed two finite 512K updates using the real 48-prefix
+superlong-v2 blend, saved iteration 301, reloaded full training state in a fresh process, and saved
+iteration 302. This proves the training pipeline, not retrieval quality or sustained adaptation.
+The current full-K/V CP gather remains a 512K correctness bridge, not the final 1M–2M transport.
 
 ## Executive summary
 
@@ -26,11 +27,14 @@ We have moved beyond a toy sparse-attention mask:
   Triton forward and backward use each query's global causal position.
 - Three launch gates exercise 8K/CP1, 64K/CP2, and 512K/CP16. Each saves full training state and
   reloads it in a fresh Python process before a second update.
+- The complete ladder has passed on LUMI. The final gate used the checksum-verified public
+  superlong-v2 artifact rather than the earlier short-context blend.
 - Unsupported combinations fail closed instead of silently falling back to a wrong or dense path.
 
-The 8K mechanism is proven; the new distributed path is implemented but not yet GPU-integrated.
-It does **not** prove million-token efficiency. The 512K bridge replicates global K/V and indexer
-K on every CP rank, and selected-set state is still B×local-L×k. Sparse decoding is not implemented.
+The mechanism and CP16 distributed path are mechanically proven through 512K. This does **not**
+prove retrieval quality or million-token efficiency. The 512K bridge replicates global K/V and
+indexer K on every CP rank, and selected-set state is still B×local-L×k. Sparse decoding is not
+implemented.
 
 ## Why DSA
 
@@ -199,6 +203,44 @@ model unfrozen and selected-set KL enabled.
 Both the main-model and indexer gradient probes were finite and nonzero. This is a correctness
 gate, not a quality or throughput result.
 
+### 64K/CP2 round trip — job 20932303
+
+The two-node gate preserved the intended 32K CP-local sequence geometry and completed a genuine
+save/reload boundary. Iteration 301 reported LM loss `2.128216`, indexer loss `0.557838`, and
+gradient norm `753.775`; iteration 302 reported `2.008822`, `0.559306`, and `950.156`. Both
+updates were finite with nonzero probes and the launcher emitted its explicit round-trip PASS.
+
+### 512K/CP16 superlong-data round trip — job 20996514
+
+This was the first bounded DSA gate using the repaired public superlong-v2 training blend rather
+than a short-context stand-in. It ran global sequence length 524,288 with CP16 (32,768 local
+tokens), TP8, 128 ranks on 16 nodes, all 36 layers sparse, 256-token blocks, one routed earlier
+block, and top-k 512. Full/uniform activation recomputation remained enabled.
+
+| Signal | Iteration 301 | Iteration 302 |
+|---|---:|---:|
+| LM loss | 2.093314 | 2.125192 |
+| Indexer loss | 0.643614 | 0.662684 |
+| Gradient norm | 1448.409 | 1305.566 |
+| Indexer probe norm | 0.009952 | 0.008738 |
+| Main-model probe norm | 2.766043 | 1.499412 |
+| Update time | 40.10 s | 37.25 s |
+| Throughput | 102.1 tok/s/GPU | 110.0 tok/s/GPU |
+| NaN / skipped | 0 / 0 | 0 / 0 |
+
+Iteration 301 was complete (`.metadata`, `common.pt`, and 256 distributed shards). A fresh
+Python/`srun` process then loaded iteration 301, including the distributed optimizer, RNG, and
+scheduler state, completed update 302, and wrote the same complete shard layout with tracker 302.
+The launcher printed `DSA sparse round trip PASS`. Peak allocated/reserved memory was about
+17.7/20.2 GiB per rank. Scheduler runtime was 608 seconds on 128 GPU slots, or 21.62 GPU-hours.
+
+The input was
+`/scratch/project_465002530/users/bmoell/superlong_data/mix/data_path.args`: 48 weighted Megatron
+prefixes, SHA-256 `8debcb373049ab52bbd8a03912da431b57acdf4dca0156c5ae73731a9099f5b8`.
+All 48 `.bin`/`.idx` pairs passed published checksums and real GPT blend construction at 512K,
+1M, and 2M. Validation reports are under
+`/scratch/project_465002530/users/bmoell/superlong_data/manifests/`.
+
 ## What Kimi K3 contributes—and what it does not
 
 The [Kimi K3 technical report](https://github.com/MoonshotAI/Kimi-K3/blob/main/k3_tech_report.pdf)
@@ -228,11 +270,11 @@ non-interleaved indexer convention.
 | Native-GQA sparse core | Validated at small/8K scale | ROCm Triton fwd/bwd and integration gate |
 | Dual LM + selected-KL gradients | Validated for one step | Job 20336946 |
 | Sustained sparse adaptation | Not run | Next quality gate |
-| Sparse checkpoint save/reload | Validated at 8K | Job 20927044: complete iterations 301/302 and fresh-process reload |
-| Context parallelism | Implemented, GPU gate pending | Zig-zag gather/autograd CPU tests; CP2 next |
+| Sparse checkpoint save/reload | Validated through 512K | Jobs 20927044, 20932303, and 20996514 |
+| Context parallelism | Validated at CP2 and CP16 | 64K and 512K GPU round trips |
 | Hierarchical candidate generation | Implemented, quality unmeasured | 256-token current + 1 routed block |
-| 128K+ memory behavior | Not validated | 64K/CP2 keeps final 32K local length and is the next memory gate |
-| 512K training | Prepared, gated | Run only after 8K and 64K round trips pass |
+| 128K+ memory behavior | Bounded gate validated at 512K | CP16 kept 32K local tokens; peak allocation about 17.7 GiB/rank |
+| 512K training | Two-update pipeline validated | Real superlong-v2 data; sustained quality adaptation not run |
 | 1M–2M training | Blocked | Replace replicated global K/V and reduce/stream selected state |
 | Sparse prefill | Not implemented | Current path assumes aligned full self-attention |
 | Sparse decode / KV cache | Not implemented | Needs paged cache and q-length-1 kernels |
@@ -240,18 +282,20 @@ non-interleaved indexer convention.
 
 ## Remaining build work
 
-### P0 — execute the prepared correctness ladder
+### P0 — correctness ladder complete; execute a quality gate
 
 1. **Passed (job 20927044):** `dsa_sparse_8k_roundtrip.sbatch` completed the GPU dense-reference
    tests, two-rank RCCL gather test, update 301, full checkpoint, fresh-process reload, and update
    302.
-2. If and only if that passes, run `dsa_sparse_64k_cp2_roundtrip.sbatch`. Its CP-local length is
-   32K, matching the final CP16 topology, so it is the cheap communication/memory gate.
-3. If and only if that passes, run `dsa_sparse_512k_cp16_roundtrip.sbatch` on 16 nodes. Success
-   requires finite LM/indexer losses and both gradient probes plus complete iterations 301/302.
-4. Compare dense and sparse loss/logits on fixed held-out batches before any sustained run.
-5. Only then choose a longer adaptation schedule and evaluate short-context retention and
-   NIAH/RULER-style retrieval against the dense 256K model.
+2. **Passed (job 20932303):** `dsa_sparse_64k_cp2_roundtrip.sbatch` validated the 32K local shape,
+   CP communication, checkpoint, and fresh-process reload.
+3. **Passed with actual superlong data (job 20996514):**
+   `dsa_sparse_512k_cp16_roundtrip.sbatch` validated the 16-node pipeline and full checkpoint
+   boundary using the checksum-verified 48-prefix blend.
+4. **Next:** compare dense and sparse loss/logits on fixed held-out batches and measure
+   attention-mass recall/retrieval before any sustained run.
+5. Only after that gate should we choose a longer adaptation schedule and evaluate short-context
+   retention and NIAH/RULER-style retrieval against the dense 256K model.
 
 The first 512K attempt, job `20938985`, stopped before its first forward pass when Megatron's
 top-level blend requested 66 samples from a mid-level component for which the default 0.5% sample
@@ -278,8 +322,8 @@ iterations 301 and 302; the final artifact is about 297 GiB and its marker is 30
 Three fail-closed launcher defects were found and fixed before the passing run: informational
 Megatron stdout contaminating the module-origin comparison, a data blend without a final newline,
 and the legacy `--recompute-activations` flag overriding full recomputation with selective
-recomputation. The preflight now rejects that recomputation regression. No 64K or 512K job has
-been submitted; CP2/64K remains the next explicit approval gate.
+recomputation. The preflight now rejects that recomputation regression. The later 64K/CP2 and
+512K/CP16 gates both passed; see jobs `20932303` and `20996514` above.
 
 ### P1 — make long training possible
 
@@ -342,10 +386,11 @@ a drop-in match for this GQA model.
 ## Recommended sequence of experiments
 
 1. **8K round trip — passed (job 20927044):** GPU oracle + RCCL collective + save/reload.
-2. **64K/CP2 round trip:** same 32K local sequence as the final job.
-3. **512K/CP16 round trip:** two sparse updates with a full checkpoint boundary.
-4. **Quality gate:** dense-vs-sparse loss/logits, attention-mass recall, retrieval, and short-context
-   retention before sustained adaptation.
+2. **64K/CP2 round trip — passed (job 20932303):** same 32K local sequence as the final job.
+3. **512K/CP16 round trip — passed (job 20996514):** two sparse updates on real superlong-v2 data
+   with a full checkpoint boundary.
+4. **Quality gate — next:** dense-vs-sparse loss/logits, attention-mass recall, retrieval, and
+   short-context retention before sustained adaptation.
 5. **Sustained 512K adaptation:** select schedule only from measured step time and quality.
 6. **Selected-row CP transport + streamed KL:** required before 1M–2M.
 7. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
@@ -353,8 +398,8 @@ a drop-in match for this GQA model.
    practically usable sparse model.
 
 Never submit the archived `sparse_512k.sbatch`; it sets `DSA_SPARSE=0` and is not sparse training.
-The only prepared 512K launcher is `dsa_sparse_512k_cp16_roundtrip.sbatch`, and it is gated behind
-successful 8K and 64K round trips plus an explicit user go-ahead.
+The bounded `dsa_sparse_512k_cp16_roundtrip.sbatch` gate has passed. Do not turn it into sustained
+adaptation without an explicit schedule, quality criteria, and user approval.
 
 ## Source map
 
@@ -371,6 +416,7 @@ successful 8K and 64K round trips plus an explicit user go-ahead.
 - `scripts/dsa/test_cp_distributed.py` — multi-rank collective/autograd gate
 - `scripts/dsa/lumi/dsa_sparse_8k_correctness.sbatch` — reproducible one-step LUMI gate
 - `scripts/dsa/lumi/dsa_sparse_{8k,64k_cp2,512k_cp16}_roundtrip.sbatch` — gated save/reload ladder
+- `scripts/validate_megatron_indexed_mix.py` — indexed-pair and real GPT blend validator
 
 ## Primary references
 

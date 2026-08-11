@@ -1,7 +1,31 @@
 # Super-long context (512K → 1M → 2M): strategy & plan
 
-**Status:** experimental next step. **Gated on 256K working first** (MIOpen prebuild in progress).
-**Date:** 2026-06-25. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
+**Status:** 512K sparse pipeline validated; quality and sustained adaptation remain gated.
+**Updated:** 2026-08-11. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
+
+## 2026-08-11 readiness snapshot
+
+The LUMI copy is now verified and usable. The missing
+`superlong_books_concat_2048k_text_document.bin` and
+`superlong_v2_rfc_specs_2048k_text_document.bin` files were restored from the public v2 artifact,
+all 48 `.bin`/`.idx` pairs match the published checksums, and the LUMI-local weighted blend is:
+
+`/scratch/project_465002530/users/bmoell/superlong_data/mix/data_path.args`
+
+The blend weights sum to 1.0. Megatron opened and boundary-read all 48 indexed datasets (1,248
+packed records and 1,459,717,053 indexed tokens), then successfully constructed real GPT blends
+at 512K, 1M, and 2M with 302 samples requested, 327 built, and
+`mid_level_dataset_surplus=0.5`. Machine-readable reports are:
+
+`/scratch/project_465002530/users/bmoell/superlong_data/manifests/lumi_megatron_{512k,1m,2m}_validation_2026-08-11.json`
+
+The reusable validator is `scripts/validate_megatron_indexed_mix.py`.
+
+The bounded DSA 512K/CP16 round-trip job `20996514` used this exact 48-prefix blend and passed two
+finite updates, a complete iteration-301 checkpoint, a fresh-process full-state reload, and a
+complete iteration-302 checkpoint. Runtime was 608 seconds on 128 GPU slots (21.62 GPU-hours).
+This proves data and training-pipeline mechanics at 512K; it does not yet prove retrieval quality
+or justify sustained training.
 
 ## TL;DR
 We now have a **predictive law** for the one thing that actually mattered (RoPE θ), so the
@@ -50,8 +74,8 @@ and **`synthetic_recall`** — the key asset: at ≥512K there are essentially *
 documents with genuine long-range dependencies**, so retrieval ability must be *manufactured*
 via synthetic recall/needle tasks spanning the full window. Mix per stage: genuine-long
 (concat papers/books/repos) for fluency + **heavy synthetic_recall** for the long-range skill.
-Same dtype/tokenizer as our 256k pipeline (verify before use). English/code-skewed (expected at
-these lengths).
+The LUMI copy now has verified dtype/index readability and real Megatron blend construction as
+recorded above. English/code-skewed (expected at these lengths).
 
 ## 4. Eval infrastructure — the gating blocker
 Our base-LM NIAH does a **single-GPU forward**; it already won't fit 256K, let alone 512K–2M.
@@ -91,13 +115,15 @@ dense goes and provides a reference for the sparse work.
 - **Compute budget is not the limit** (~1.4M GPU-h); **wall-time per step and infra are.**
 
 ## Bottom line
-Super-long is **θ-predicted and data-ready**, but it's an **infrastructure + architecture**
-project, not a data one. Sequence: fix 256K → build a ≥256K eval → 512K (the real next
-deliverable) → 1M (stretch) → 2M (proof-of-concept) → sparse-attention track for practical 1M+.
+Super-long is now **data-verified**, and the DSA correctness bridge has completed at 512K/CP16.
+The next decision is a measured quality gate, not another scale jump: compare dense and sparse
+loss/logits, attention-mass recall, retrieval, and short-context retention. If it passes, choose a
+small sustained 512K adaptation budget. Before 1M–2M, replace replicated global K/V with
+selected-row exchange and stream or recompute selected-set state.
 
 ---
 
-## Compute estimates (anchored to measured LUMI throughput)
+## Dense compute estimates (historical baseline, anchored to measured LUMI throughput)
 Measured: 64K = 66 s/iter, 128K = 259 s/iter at 16 nodes; going 64K→128K ~halved tok/s while
 seq doubled ⇒ **attention-dominated, cost/token ≈ ∝ sequence length**. Per-GCD ≈ 253 tok/s/GPU
 at 128K ⇒ **~1.1e-6 GPU-h/token × (S/128K)**.
@@ -112,6 +138,11 @@ at 128K ⇒ **~1.1e-6 GPU-h/token × (S/128K)**.
 hours. Full dense super-long sweep ≈ **~9–10k GPU-h**. Reference: v3 (128K, 2B) ≈ 2,200 GPU-h;
 256K finishing stage ≈ 600–800; each NIAH eval ≈ 10–50 (1 GPU). **Budget (~1.4M GPU-h) is not
 the constraint** — wall-clock, getting 128 nodes for 2M, and CP=128 working are.
+
+The sparse correctness configuration is different from this dense table: 512K used CP16 and kept
+32K local tokens per rank. Its two-update end-to-end gate consumed 21.62 GPU-hours, including
+preflight, dataset/cache setup, two large checkpoints, and a fresh-process reload. That figure is
+an infrastructure-gate cost, not a sustained-training throughput estimate.
 
 ## Sparse attention for the baby model (Qwen3 9B dense) — three paths
 Dense ABF+CP is the *baseline*; sparse attention is the *practical* route to 1M–2M.

@@ -21,12 +21,14 @@ Validated:
 - nonzero gradients in both the main model and indexer;
 - Megatron CP zig-zag reorder and summed collective backward on two CPU ranks; and
 - causal hierarchical block routing without future-query leakage; and
-- an 8K GPU/RCCL save/reload round trip through complete iterations 301 and 302 (job 20927044).
+- an 8K GPU/RCCL save/reload round trip through complete iterations 301 and 302 (job 20927044);
+- a 64K/CP2 round trip at the final 32K local shape (job 20932303); and
+- a 512K/CP16 round trip on the checksum-verified 48-prefix superlong-v2 blend, including a
+  fresh-process full-state reload (job 20996514).
 
 Not yet implemented or validated:
 
 - sustained sparse adaptation;
-- GPU integration of the new CP2/CP16 path;
 - quality/recall of the coarse 512-token block route;
 - selected-row rather than replicated-global K/V transport for 1M–2M;
 - sparse prefill/decode and KV-cache integration; and
@@ -51,6 +53,7 @@ Not yet implemented or validated:
 - `lumi/dsa_sparse_8k_roundtrip.sbatch` — GPU/RCCL and checkpoint round trip
 - `lumi/dsa_sparse_64k_cp2_roundtrip.sbatch` — two-node final-local-shape gate
 - `lumi/dsa_sparse_512k_cp16_roundtrip.sbatch` — gated 16-node 512K round trip
+- `../validate_megatron_indexed_mix.py` — indexed-pair and real GPT blend validator
 
 Other modules in this directory are earlier prototypes, diagnostics, or layer-search experiments.
 They are useful for research history but are not the current production path.
@@ -107,3 +110,13 @@ Sparse adaptation fails closed unless:
 `flat_exact` remains O(L²) arithmetic and is an 8K oracle. `block_cp` is subquadratic selection but
 replicates global K/V, so it is a bounded 512K correctness bridge rather than a 1M–2M production
 backend. Do not submit the archived `sparse_512k.sbatch`.
+
+## Verified superlong data
+
+The passing 512K gate used
+`/scratch/project_465002530/users/bmoell/superlong_data/mix/data_path.args`, not a short-context
+stand-in. It contains 48 weighted Megatron prefixes and had SHA-256
+`8debcb373049ab52bbd8a03912da431b57acdf4dca0156c5ae73731a9099f5b8` at submission. All 48
+indexed pairs passed checksum/read tests and real 302-sample blend builds at 512K, 1M, and 2M.
+See `docs/superlong_context_plan.md` for report paths and `scripts/validate_megatron_indexed_mix.py`
+for the repeatable validation command.
