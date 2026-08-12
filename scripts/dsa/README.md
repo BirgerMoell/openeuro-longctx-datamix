@@ -48,11 +48,14 @@ Not yet implemented or validated:
 - `triton_dsa.py` — ROCm Triton sparse attention forward/backward
 - `test_dsa_correctness.py` — dense-reference correctness suite
 - `test_cp_distributed.py` — multi-rank collective/autograd suite
+- `test_hierarchical_indexer.py` — deployed block-router geometry/causality suite
 - `lumi/dsa_warmup_failclosed.sbatch` — frozen-indexer warm-up launcher
 - `lumi/dsa_sparse_8k_correctness.sbatch` — one-step sparse integration gate
 - `lumi/dsa_sparse_8k_roundtrip.sbatch` — GPU/RCCL and checkpoint round trip
 - `lumi/dsa_sparse_64k_cp2_roundtrip.sbatch` — two-node final-local-shape gate
 - `lumi/dsa_sparse_512k_cp16_roundtrip.sbatch` — gated 16-node 512K round trip
+- `lumi/dsa_sparse_512k_k2048_calibration.sbatch` — 73-update, k=2048 real-data calibration
+- `lumi/dsa_sparse_calibration.sh` — fail-closed multi-process calibration driver
 - `../validate_megatron_indexed_mix.py` — indexed-pair and real GPT blend validator
 
 Other modules in this directory are earlier prototypes, diagnostics, or layer-search experiments.

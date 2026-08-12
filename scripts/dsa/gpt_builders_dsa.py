@@ -105,8 +105,6 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
             raise RuntimeError("block_cp requires --recompute-granularity full")
         if getattr(config, "recompute_method", None) != "uniform":
             raise RuntimeError("block_cp requires --recompute-method uniform")
-        if os.environ.get("DSA_RECALL_LOG", "0") == "1":
-            raise RuntimeError("DSA_RECALL_LOG must be disabled for block_cp")
         print_rank_0(
             "DSA block_cp guard: "
             f"seq={args.seq_length} cp={cp_size} block={block_size} "

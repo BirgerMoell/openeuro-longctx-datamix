@@ -1,5 +1,5 @@
 #!/bin/bash
-# Common fail-closed driver: one sparse update, full checkpoint, fresh-process reload, second update.
+# Fail-closed 512K calibration: two 36-update phases and a final reload update.
 set -euo pipefail
 module purge
 
@@ -41,18 +41,17 @@ export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p "$MIOPEN_USER_DB_PATH" "$OUT"
 
 export DSA_PATTERN=${DSA_PATTERN:-SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS}
-export DSA_TOPK=${DSA_TOPK:-512} DSA_N_HEADS=${DSA_N_HEADS:-16}
+export DSA_TOPK=${DSA_TOPK:-2048} DSA_N_HEADS=${DSA_N_HEADS:-16}
 export DSA_HEAD_DIM=${DSA_HEAD_DIM:-128} DSA_LOSS_COEFF=${DSA_LOSS_COEFF:-0.1}
-export DSA_SPARSE_RUN=${DSA_SPARSE_RUN:-1} DSA_SPARSE=${DSA_SPARSE:-1}
-export DSA_FREEZE_MODEL=${DSA_FREEZE_MODEL:-0} DSA_ALLOW_DENSE_LAYERS=${DSA_ALLOW_DENSE_LAYERS:-0}
-export DSA_ROUTER=${DSA_ROUTER:-block_cp} DSA_BLOCK_SIZE=${DSA_BLOCK_SIZE:-256}
-export DSA_ROUTED_BLOCKS=${DSA_ROUTED_BLOCKS:-1}
-export DSA_CP_MAX_SEQ=${DSA_CP_MAX_SEQ:-524288} DSA_ALLOW_LONGER_CP=${DSA_ALLOW_LONGER_CP:-0}
-export DSA_GRAD_PROBE=${DSA_GRAD_PROBE:-1} DSA_RECALL_LOG=${DSA_RECALL_LOG:-0}
-export DSA_RECALL_EVERY=${DSA_RECALL_EVERY:-36} DSA_RECALL_KS=${DSA_RECALL_KS:-512,1024,2048}
-export DSA_KL_Q_BLOCK=${DSA_KL_Q_BLOCK:-128}
-export DSA_REQUIRE_NON_INTERLEAVED_ROPE=${DSA_REQUIRE_NON_INTERLEAVED_ROPE:-1}
-export DSA_RESUME=${DSA_RESUME:-1} DSA_LOAD_BASE=${DSA_LOAD_BASE:-""}
+export DSA_SPARSE_RUN=1 DSA_SPARSE=1 DSA_FREEZE_MODEL=0 DSA_ALLOW_DENSE_LAYERS=0
+export DSA_ROUTER=block_cp DSA_BLOCK_SIZE=${DSA_BLOCK_SIZE:-128}
+export DSA_ROUTED_BLOCKS=${DSA_ROUTED_BLOCKS:-15}
+export DSA_CP_MAX_SEQ=524288 DSA_ALLOW_LONGER_CP=0
+export DSA_GRAD_PROBE=${DSA_GRAD_PROBE:-1} DSA_RECALL_LOG=${DSA_RECALL_LOG:-1}
+export DSA_RECALL_EVERY=${DSA_RECALL_EVERY:-36}
+export DSA_RECALL_KS=${DSA_RECALL_KS:-512,1024,2048}
+export DSA_KL_Q_BLOCK=${DSA_KL_Q_BLOCK:-64}
+export DSA_REQUIRE_NON_INTERLEAVED_ROPE=1 DSA_RESUME=1 DSA_LOAD_BASE=""
 export MEG EXT OUT DATA_BLEND_FILE DATA_CACHE_PATH SEQ_LENGTH CP_SIZE ROTARY_BASE
 export MID_LEVEL_DATASET_SURPLUS
 export TOKENIZER_PATH=$TOK
@@ -64,19 +63,6 @@ singularity exec -B "$DSADIR" -B "$EXT" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
     --block-size $DSA_BLOCK_SIZE --routed-blocks $DSA_ROUTED_BLOCKS --topk $DSA_TOPK \
     --mid-level-dataset-surplus $MID_LEVEL_DATASET_SURPLUS"
 
-if [ "${RUN_GPU_TESTS:-0}" = "1" ]; then
-  echo "##### GPU dense-reference and 2-rank RCCL gates"
-  srun --nodes=1 --ntasks=1 singularity exec \
-    -B "$DSADIR" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
-    "export PYTHONPATH=$DSADIR:$MEG:\${PYTHONPATH:-}; python3 $DSADIR/test_dsa_correctness.py"
-  TEST_PORT=$((MASTER_PORT + 1))
-  srun --nodes=1 --ntasks=2 --ntasks-per-node=2 singularity exec \
-    -B "$DSADIR" -B "$BIND_DIRS" "$CONTAINER" bash -lc \
-    "export PYTHONPATH=$DSADIR:$MEG:\${PYTHONPATH:-} MASTER_ADDR=$MASTER_ADDR \
-      MASTER_PORT=$TEST_PORT WORLD_SIZE=2 RANK=\$SLURM_PROCID LOCAL_RANK=\$SLURM_LOCALID; \
-      python3 $DSADIR/test_cp_distributed.py --backend nccl"
-fi
-
 checkpoint_complete () {
   local root=$1 expected=$2 marker dir
   marker=$root/latest_checkpointed_iteration.txt
@@ -87,17 +73,32 @@ checkpoint_complete () {
     find "$dir" -maxdepth 1 -name '*.distcp' -type f -print -quit | grep -q .
 }
 
-if checkpoint_complete "$OUT" 302; then
-  echo "##### round trip already complete at iteration 302: $OUT"
+if checkpoint_complete "$OUT" 373; then
+  echo "##### calibration already complete at iteration 373: $OUT"
   exit 0
 fi
-if [ -f "$OUT/latest_checkpointed_iteration.txt" ] && ! checkpoint_complete "$OUT" 301; then
-  echo "FATAL: output marker is neither a complete iteration 301 nor 302 checkpoint"
-  exit 1
-fi
-if [ ! -f "$OUT/latest_checkpointed_iteration.txt" ] && \
-   find "$OUT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-  echo "FATAL: output contains files but has no valid checkpoint marker: $OUT"
+
+current=300
+load_dir=$WARM
+no_load_state=1
+if [ -f "$OUT/latest_checkpointed_iteration.txt" ]; then
+  current=$(<"$OUT/latest_checkpointed_iteration.txt")
+  case "$current" in
+    336|372)
+      if ! checkpoint_complete "$OUT" "$current"; then
+        echo "FATAL: output marker points to incomplete iteration $current"
+        exit 1
+      fi
+      load_dir=$OUT
+      no_load_state=0
+      ;;
+    *)
+      echo "FATAL: unexpected calibration checkpoint marker $current"
+      exit 1
+      ;;
+  esac
+elif find "$OUT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+  echo "FATAL: output contains files but has no complete checkpoint marker: $OUT"
   exit 1
 fi
 
@@ -105,27 +106,39 @@ c=fe
 BIND_MASK="0x${c}000000000000,0x${c}00000000000000,0x${c}0000,0x${c}000000,0x${c},0x${c}00,0x${c}00000000,0x${c}0000000000"
 
 run_train () {
-  local load_dir=$1 target=$2 no_load_state=$3 exit_interval=$4
-  export LOAD_DIR=$load_dir TARGET_ITER=$target NO_LOAD_STATE=$no_load_state EXIT_INTERVAL=$exit_interval
-  echo "##### sparse train process: load=$load_dir target=$target seq=$SEQ_LENGTH cp=$CP_SIZE"
+  local from=$1 target=$2 no_state=$3 save_every=$4
+  export LOAD_DIR=$from TARGET_ITER=$target NO_LOAD_STATE=$no_state EXIT_INTERVAL=""
+  export TRAIN_ITERS=$target SAVE_INTERVAL=$save_every
+  echo "##### calibration process: load=$from target=$target seq=$SEQ_LENGTH cp=$CP_SIZE topk=$DSA_TOPK"
   srun --label --cpu-bind=mask_cpu:$BIND_MASK \
     singularity exec -B "$DSADIR" -B "$EXT" -B "$BIND_DIRS" \
     "$CONTAINER" bash "$INNER"
 }
 
-if ! checkpoint_complete "$OUT" 301; then
-  run_train "$WARM" 301 1 301
-  if ! checkpoint_complete "$OUT" 301; then
-    echo "FATAL: first process did not produce a complete iteration 301 checkpoint"
+if [ "$current" -lt 336 ]; then
+  run_train "$load_dir" 336 "$no_load_state" 336
+  if ! checkpoint_complete "$OUT" 336; then
+    echo "FATAL: calibration process did not produce complete iteration 336"
+    exit 1
+  fi
+  current=336
+  load_dir=$OUT
+  no_load_state=0
+fi
+
+if [ "$current" -lt 372 ]; then
+  run_train "$load_dir" 372 "$no_load_state" 372
+  if ! checkpoint_complete "$OUT" 372; then
+    echo "FATAL: calibration process did not produce complete iteration 372"
     exit 1
   fi
 fi
 
-# This is deliberately a new Python/srun process. It must load model, optimizer,
-# RNG, and scheduler state written by the first process before update 302.
-run_train "$OUT" 302 0 ""
-if ! checkpoint_complete "$OUT" 302; then
-  echo "FATAL: reload process did not produce a complete iteration 302 checkpoint"
+# Third Python/srun process: prove that optimizer, scheduler, and RNG reload
+# after all 72 adaptation updates before accepting the calibration artifact.
+run_train "$OUT" 373 0 373
+if ! checkpoint_complete "$OUT" 373; then
+  echo "FATAL: reload process did not produce complete iteration 373"
   exit 1
 fi
-echo "##### DSA sparse round trip PASS: seq=$SEQ_LENGTH cp=$CP_SIZE out=$OUT"
+echo "##### DSA 512K k2048 calibration PASS: updates=73 seq=$SEQ_LENGTH cp=$CP_SIZE out=$OUT"

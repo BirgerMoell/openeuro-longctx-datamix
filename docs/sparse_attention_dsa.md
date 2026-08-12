@@ -1,6 +1,6 @@
 # OpenEuroLLM DeepSeek Sparse Attention work
 
-**Status date:** 2026-08-11
+**Status date:** 2026-08-12
 **Scope:** OpenEuroLLM 9B GQA long-context research on LUMI
 **Canonical implementation:** `scripts/dsa/` in this repository
 **Current verdict:** the fail-closed DSA path now passes save/reload gates at 8K/CP1, 64K/CP2,
@@ -8,6 +8,8 @@ and 512K/CP16. Job `20996514` completed two finite 512K updates using the real 4
 superlong-v2 blend, saved iteration 301, reloaded full training state in a fresh process, and saved
 iteration 302. This proves the training pipeline, not retrieval quality or sustained adaptation.
 The current full-K/V CP gather remains a 512K correctness bridge, not the final 1M–2M transport.
+The evidence review and approved k=2,048 calibration design are recorded in
+[`sparse_attention_2026_evidence_plan.md`](sparse_attention_2026_evidence_plan.md).
 
 ## Executive summary
 
@@ -49,9 +51,13 @@ and selects the causal top-k keys. The model's original Q/K/V attention is then 
 those selected positions. The indexer chooses positions; it does not replace the model's content
 attention.
 
-The exact 8K oracle used k=2048. The 512K bridge uses k=512: the current 256-token block plus one
+The exact 8K oracle used k=2048. The passing 512K bridge used k=512: the current 256-token block plus one
 learned earlier 256-token block. This is deliberately a pipeline/correctness experiment, not yet a
 claim that two blocks preserve enough attention mass for quality.
+
+The next calibration changes the deployed geometry to 128-token blocks, one current block plus 15
+learned earlier blocks, and k=2048. MiniMax MSA, LongCat LSA, and HiLS independently use an active
+budget near 2,048 tokens, making this a much more defensible starting point for actual adaptation.
 
 ## The two training phases
 
@@ -389,12 +395,13 @@ a drop-in match for this GQA model.
 2. **64K/CP2 round trip — passed (job 20932303):** same 32K local sequence as the final job.
 3. **512K/CP16 round trip — passed (job 20996514):** two sparse updates on real superlong-v2 data
    with a full checkpoint boundary.
-4. **Quality gate — next:** dense-vs-sparse loss/logits, attention-mass recall, retrieval, and
-   short-context retention before sustained adaptation.
-5. **Sustained 512K adaptation:** select schedule only from measured step time and quality.
-6. **Selected-row CP transport + streamed KL:** required before 1M–2M.
-7. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
-8. **Inference track:** sparse prefill and decode must pass independently before publishing a
+4. **k=2048 calibration — prepared:** 73 real 512K updates (38.27M tokens), two complete
+   per-layer sampled dense-attention recall cycles, and three-process save/reload validation.
+5. **Quality gate:** held-out loss, attention-mass recall, retrieval, and short-context retention.
+6. **Sustained 512K adaptation:** 0.1B tokens first; expand only from measured learning curves.
+7. **Selected-row CP transport + streamed KL:** required before 1M–2M.
+8. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
+9. **Inference track:** sparse prefill and decode must pass independently before publishing a
    practically usable sparse model.
 
 Never submit the archived `sparse_512k.sbatch`; it sets `DSA_SPARSE=0` and is not sparse training.
@@ -414,8 +421,10 @@ adaptation without an explicit schedule, quality criteria, and user approval.
 - `scripts/dsa/gpt_builders_dsa.py` — config bridge, checkpoint loading, gradient probes
 - `scripts/dsa/test_dsa_correctness.py` — dense-reference correctness gates
 - `scripts/dsa/test_cp_distributed.py` — multi-rank collective/autograd gate
+- `scripts/dsa/test_hierarchical_indexer.py` — block-router geometry and causality regressions
 - `scripts/dsa/lumi/dsa_sparse_8k_correctness.sbatch` — reproducible one-step LUMI gate
 - `scripts/dsa/lumi/dsa_sparse_{8k,64k_cp2,512k_cp16}_roundtrip.sbatch` — gated save/reload ladder
+- `scripts/dsa/lumi/dsa_sparse_512k_k2048_calibration.sbatch` — evidence-calibrated 512K run
 - `scripts/validate_megatron_indexed_mix.py` — indexed-pair and real GPT blend validator
 
 ## Primary references
@@ -427,3 +436,13 @@ adaptation without an explicit schedule, quality criteria, and user approval.
 - [FlashMLA](https://github.com/deepseek-ai/FlashMLA) — sparse prefill/decode kernel reference
 - [Kimi K3 technical report](https://github.com/MoonshotAI/Kimi-K3/blob/main/k3_tech_report.pdf) —
   progressive long-context curriculum and data guidance
+- [MiniMax Sparse Attention](https://arxiv.org/abs/2606.13392) and
+  [official kernels](https://github.com/MiniMax-AI/MSA) — GQA block router, detached KL, 2K budget
+- [LongCat Sparse Attention](https://arxiv.org/abs/2608.01662) and
+  [official implementation](https://github.com/meituan-longcat/LongCat-2.0) — 2K streaming-aware
+  budget, staged 128K/512K training, and HELMET evaluation
+- [HiLS-Attention](https://arxiv.org/abs/2607.02980) and
+  [official implementation](https://github.com/Tencent-Hunyuan/HiLS-Attention) — end-to-end chunk
+  selection and dense-checkpoint conversion
+- [Inkling model card](https://huggingface.co/thinkingmachines/Inkling) — 1M hybrid local/global
+  reference architecture

@@ -7,6 +7,14 @@ set -euo pipefail
 : "${ROTARY_BASE:?}" "${TARGET_ITER:?}" "${TOKENIZER_PATH:?}"
 : "${MID_LEVEL_DATASET_SURPLUS:?}"
 
+TRAIN_ITERS=${TRAIN_ITERS:-$TARGET_ITER}
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-1}
+SAVE_INTERVAL=${SAVE_INTERVAL:-$TARGET_ITER}
+LEARNING_RATE=${LEARNING_RATE:-1e-6}
+MIN_LEARNING_RATE=${MIN_LEARNING_RATE:-$LEARNING_RATE}
+LR_DECAY_STYLE=${LR_DECAY_STYLE:-constant}
+LR_WARMUP_ITERS=${LR_WARMUP_ITERS:-0}
+
 export RANK=${RANK:-${SLURM_PROCID:?}} LOCAL_RANK=${LOCAL_RANK:-${SLURM_LOCALID:?}}
 export PYTHONPATH="$DSADIR:$MEG:${PYTHONPATH:-}"
 # Importing Megatron emits informational lines on stdout. The resolved module
@@ -53,9 +61,10 @@ exec python3 -u -m pretrain_gpt \
   --context-parallel-size "$CP_SIZE" --sequence-parallel --use-distributed-optimizer \
   --recompute-granularity full --recompute-method uniform \
   --recompute-num-layers 1 \
-  --micro-batch-size 1 --global-batch-size 1 --train-iters 302 --bf16 \
+  --micro-batch-size 1 --global-batch-size "$GLOBAL_BATCH_SIZE" --train-iters "$TRAIN_ITERS" --bf16 \
   --optimizer adam --adam-beta1 0.9 --adam-beta2 0.95 --adam-eps 1e-8 \
-  --lr 1e-6 --min-lr 1e-6 --lr-decay-style constant --lr-warmup-iters 0 \
+  --lr "$LEARNING_RATE" --min-lr "$MIN_LEARNING_RATE" \
+  --lr-decay-style "$LR_DECAY_STYLE" --lr-warmup-iters "$LR_WARMUP_ITERS" \
   --override-opt-param-scheduler --clip-grad 1.0 --weight-decay 0.1 \
   --transformer-impl transformer_engine --attention-backend unfused \
   --no-async-tensor-model-parallel-allreduce --no-masked-softmax-fusion \
@@ -65,6 +74,6 @@ exec python3 -u -m pretrain_gpt \
   --mid-level-dataset-surplus "$MID_LEVEL_DATASET_SURPLUS" \
   --tokenizer-type HuggingFaceTokenizer --tokenizer-model "$TOKENIZER_PATH" \
   --make-vocab-size-divisible-by 128 --dataloader-type cyclic --num-workers 1 \
-  --ckpt-format torch_dist "${LOAD_ARGS[@]}" --save "$OUT" --save-interval "$TARGET_ITER" \
+  --ckpt-format torch_dist "${LOAD_ARGS[@]}" --save "$OUT" --save-interval "$SAVE_INTERVAL" \
   "${EXIT_ARGS[@]}" \
   --eval-interval 100000000 --eval-iters 0 --log-interval 1 --log-throughput

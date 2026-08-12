@@ -275,11 +275,18 @@ def apply_sparse_dsa_patches():
 _recall_state = {"enabled": False, "every": 36, "ks": (512, 1024, 2048), "counts": {}}
 
 
-def _recall_selected_indices(index_scores, topk_indices, query_rows, k_eval, sk):
+def _recall_selected_indices(
+    index_scores,
+    topk_indices,
+    query_rows,
+    query_global_positions,
+    k_eval,
+    sk,
+):
     sampled_scores = index_scores[:, query_rows]
     if index_scores.shape[-1] == sk:
         positions = torch.arange(sk, device=index_scores.device).view(1, 1, -1)
-        causal = positions <= query_rows.view(1, -1, 1)
+        causal = positions <= query_global_positions.view(1, -1, 1)
         sampled_scores = sampled_scores.masked_fill(~causal, float("-inf"))
         chosen = sampled_scores.topk(min(k_eval, sk), dim=-1)
         return chosen.indices.to(torch.long)
@@ -320,8 +327,12 @@ def _maybe_log_recall(
             )
         nq = min(64, sq)
         query_rows = torch.linspace(0, sq - 1, nq, device=query.device).round().long()
+        cp = getattr(pg_collection, "cp", None)
+        cp_size, cp_rank = cp_topology(cp)
+        all_query_positions = cp_global_positions(sq, cp_size, cp_rank, device=query.device)
+        query_global_positions = all_query_positions[query_rows]
         key_positions = torch.arange(sk, device=query.device).view(1, 1, -1)
-        causal = key_positions <= query_rows.view(1, -1, 1)
+        causal = key_positions <= query_global_positions.view(1, -1, 1)
         heads_per_group = n_query_heads // n_kv_heads
         target = torch.zeros(batch, nq, sk, device=query.device, dtype=torch.float32)
 
@@ -345,25 +356,39 @@ def _maybe_log_recall(
 
         for k_eval in state["ks"]:
             indices = _recall_selected_indices(
-                index_scores, topk_indices, query_rows, k_eval, sk
+                index_scores,
+                topk_indices,
+                query_rows,
+                query_global_positions,
+                k_eval,
+                sk,
             )
             valid = (indices >= 0) & (indices < sk) & (
-                indices <= query_rows.view(1, -1, 1)
+                indices <= query_global_positions.view(1, -1, 1)
             )
             captured_per_row = torch.gather(target, -1, indices.clamp(min=0))
             captured_per_row = (captured_per_row * valid).sum(dim=-1)
-            metrics = [captured_per_row.mean()]
+            sums_and_counts = [
+                captured_per_row.sum(),
+                captured_per_row.new_tensor(captured_per_row.numel()),
+            ]
             for quartile in range(4):
-                lo = quartile * nq // 4
-                hi = (quartile + 1) * nq // 4
-                metrics.append(captured_per_row[:, lo:hi].mean())
-            metrics = torch.stack(metrics)
+                lo = quartile * sk // 4
+                hi = (quartile + 1) * sk // 4
+                in_quartile = (query_global_positions >= lo) & (query_global_positions < hi)
+                selected = captured_per_row[:, in_quartile]
+                sums_and_counts.extend(
+                    (selected.sum(), selected.new_tensor(selected.numel()))
+                )
+            sums_and_counts = torch.stack(sums_and_counts)
             if dist.is_available() and dist.is_initialized():
-                dist.all_reduce(metrics, op=dist.ReduceOp.AVG)
+                dist.all_reduce(sums_and_counts, op=dist.ReduceOp.SUM)
+            metrics = sums_and_counts[0::2] / sums_and_counts[1::2].clamp_min(1)
             if not dist.is_initialized() or dist.get_rank() == 0:
                 quartiles = ",".join(f"{value:.3f}" for value in metrics[1:].tolist())
                 print(
                     f"[dsa recall] layer={layer}/{num_layers} layer-step={step} "
+                    f"cp={cp_size} sampled-queries={int(sums_and_counts[1].item())} "
                     f"top-{min(k_eval, index_scores.shape[-1])} "
                     f"mass={metrics[0].item():.3f} quartiles=[{quartiles}]",
                     flush=True,
@@ -371,11 +396,14 @@ def _maybe_log_recall(
 
 
 def apply_indexer_recall_logging(every=36, k_eval=None):
-    """Wrap the active indexer loss with staggered, correctly attributed recall probes."""
-    if os.environ.get("DSA_ROUTER", "flat_exact").lower() == "block_cp":
-        raise RuntimeError(
-            "dense attention-mass recall is intentionally disabled for block_cp at long context"
-        )
+    """Wrap the active indexer loss with staggered, correctly attributed recall probes.
+
+    For context-parallel block routing this computes an exact dense teacher only
+    for 64 sampled local queries in one layer per update.  It never materializes
+    an O(L^2) tensor, but it does deliberately add a bounded O(64*L) diagnostic
+    so a long sparse run is gated by measured attention-mass recall rather than
+    by training loss alone.
+    """
     if getattr(_dsa, "_oellm_recall_wrapper", False):
         return
     ks_env = os.environ.get("DSA_RECALL_KS", "512,1024,2048")
