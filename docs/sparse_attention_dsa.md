@@ -55,7 +55,8 @@ The exact 8K oracle used k=2048. The passing 512K bridge used k=512: the current
 learned earlier 256-token block. This is deliberately a pipeline/correctness experiment, not yet a
 claim that two blocks preserve enough attention mass for quality.
 
-The next calibration changes the deployed geometry to 128-token blocks, one current block plus 15
+LUMI job `21050508` is the submitted next calibration. It changes the deployed geometry to
+128-token blocks, one current block plus 15
 learned earlier blocks, and k=2048. MiniMax MSA, LongCat LSA, and HiLS independently use an active
 budget near 2,048 tokens, making this a much more defensible starting point for actual adaptation.
 
@@ -395,7 +396,7 @@ a drop-in match for this GQA model.
 2. **64K/CP2 round trip — passed (job 20932303):** same 32K local sequence as the final job.
 3. **512K/CP16 round trip — passed (job 20996514):** two sparse updates on real superlong-v2 data
    with a full checkpoint boundary.
-4. **k=2048 calibration — prepared:** 73 real 512K updates (38.27M tokens), two complete
+4. **k=2048 calibration — submitted as job 21050508:** 73 real 512K updates (38.27M tokens), two complete
    per-layer sampled dense-attention recall cycles, and three-process save/reload validation.
 5. **Quality gate:** held-out loss, attention-mass recall, retrieval, and short-context retention.
 6. **Sustained 512K adaptation:** 0.1B tokens first; expand only from measured learning curves.

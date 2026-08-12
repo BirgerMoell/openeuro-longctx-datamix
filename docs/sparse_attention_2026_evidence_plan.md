@@ -32,6 +32,11 @@ not a sufficient gate.
 
 ## Immediate 512K calibration
 
+**Submitted:** LUMI job `21050508` on 2026-08-12 from immutable source commit `84feff7`
+at `/scratch/project_465002530/users/bmoell/dsa_exp/84feff7_512k_k2048/scripts/dsa`.
+The job is monitored by the existing fail-closed sparse-attention automation; no duplicate should be
+submitted while it is pending or running.
+
 The first evidence-calibrated run is deliberately bounded but is real full-parameter continued
 pretraining, not another two-update plumbing test:
 
