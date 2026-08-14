@@ -32,10 +32,14 @@ not a sufficient gate.
 
 ## Immediate 512K calibration
 
-**Submitted:** LUMI job `21050508` on 2026-08-12 from immutable source commit `84feff7`
-at `/scratch/project_465002530/users/bmoell/dsa_exp/84feff7_512k_k2048/scripts/dsa`.
-The job is monitored by the existing fail-closed sparse-attention automation; no duplicate should be
-submitted while it is pending or running.
+**First launch outcome:** LUMI job `21050508`, submitted on 2026-08-12 from immutable source commit
+`84feff7`, failed after two seconds in the launcher's required-path check. The shared checkout
+`/scratch/project_465002530/users/luomajou/oellm-test/NVIDIA-Megatron-LM` had been removed before
+the allocation began. Preflight, data loading, model loading, and training never started; no output
+artifact was created. The pinned revision `b359462c12858cedd2238a22eca0dca7aa6b8872` remains
+available from the official NVIDIA Megatron-LM repository. Before a replacement launch, create an
+immutable Birger-owned checkout of that exact revision, verify it with the existing preflight, and
+pass it explicitly through `MEGATRON_ROOT`. Do not silently use a different Megatron revision.
 
 The first evidence-calibrated run is deliberately bounded but is real full-parameter continued
 pretraining, not another two-update plumbing test:

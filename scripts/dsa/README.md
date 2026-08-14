@@ -26,6 +26,10 @@ Validated:
 - a 512K/CP16 round trip on the checksum-verified 48-prefix superlong-v2 blend, including a
   fresh-process full-state reload (job 20996514).
 
+The first k=2048 calibration launch, job `21050508`, failed before preflight because its shared
+external Megatron checkout had been removed. It performed no training and created no output. The
+replacement prerequisite is an immutable, project-owned checkout matching `MEGATRON_REVISION`.
+
 Not yet implemented or validated:
 
 - sustained sparse adaptation;

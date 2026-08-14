@@ -1,7 +1,7 @@
 # Super-long context (512K → 1M → 2M): strategy & plan
 
 **Status:** 512K sparse pipeline validated; quality and sustained adaptation remain gated.
-**Updated:** 2026-08-11. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
+**Updated:** 2026-08-14. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
 
 ## 2026-08-11 readiness snapshot
 
@@ -26,6 +26,12 @@ finite updates, a complete iteration-301 checkpoint, a fresh-process full-state 
 complete iteration-302 checkpoint. Runtime was 608 seconds on 128 GPU slots (21.62 GPU-hours).
 This proves data and training-pipeline mechanics at 512K; it does not yet prove retrieval quality
 or justify sustained training.
+
+The first 73-update k=2048 calibration attempt, job `21050508`, never reached preflight or training.
+It failed after two seconds because the launcher's shared external Megatron path had been removed.
+The data, warm checkpoint, sparse code, and output were untouched. A replacement must use a
+Birger-owned immutable checkout of the exact pinned upstream Megatron revision rather than another
+shared scratch dependency.
 
 ## TL;DR
 We now have a **predictive law** for the one thing that actually mattered (RoPE θ), so the
