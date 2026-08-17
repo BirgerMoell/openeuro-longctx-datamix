@@ -1,14 +1,16 @@
 # OpenEuroLLM DeepSeek Sparse Attention work
 
-**Status date:** 2026-08-12
+**Status date:** 2026-08-17
 **Scope:** OpenEuroLLM 9B GQA long-context research on LUMI
 **Canonical implementation:** `scripts/dsa/` in this repository
-**Current verdict:** the fail-closed DSA path now passes save/reload gates at 8K/CP1, 64K/CP2,
-and 512K/CP16. Job `20996514` completed two finite 512K updates using the real 48-prefix
-superlong-v2 blend, saved iteration 301, reloaded full training state in a fresh process, and saved
-iteration 302. This proves the training pipeline, not retrieval quality or sustained adaptation.
-The current full-K/V CP gather remains a 512K correctness bridge, not the final 1M–2M transport.
-The evidence review and approved k=2,048 calibration design are recorded in
+**Current verdict:** the fail-closed DSA path passes save/reload gates at 8K/CP1, 64K/CP2, and
+512K/CP16, and the 73-update 512K/CP16 k=2,048 calibration completed through three fresh
+processes and checkpoints 336/372/373. This proves bounded sustained training and recovery on the
+real 48-prefix superlong-v2 blend. It does **not** validate the current router for quality: mean
+top-2,048 attention-mass recall fell from 0.103 to 0.092, with 25/36 layers declining and severe
+position bias. Do not extend this artifact or start a larger run until the router and quality gate
+are repaired. The current full-K/V CP gather also remains a 512K bridge, not the final 1M–2M
+transport. The evidence and terminal verdict are recorded in
 [`sparse_attention_2026_evidence_plan.md`](sparse_attention_2026_evidence_plan.md).
 
 ## Executive summary
@@ -31,6 +33,10 @@ We have moved beyond a toy sparse-attention mask:
   reloads it in a fresh Python process before a second update.
 - The complete ladder has passed on LUMI. The final gate used the checksum-verified public
   superlong-v2 artifact rather than the earlier short-context blend.
+- A real 73-update 512K/CP16 calibration completed with finite LM/indexer losses, nonzero dual
+  gradient probes, three complete checkpoints, and two genuine full-state reload boundaries.
+- Its router-quality gate failed: top-2,048 attention-mass recall was low and declined across the
+  run, so mechanical success is not being misreported as a successful sparse conversion.
 - Unsupported combinations fail closed instead of silently falling back to a wrong or dense path.
 
 The mechanism and CP16 distributed path are mechanically proven through 512K. This does **not**
@@ -61,8 +67,11 @@ write occurred. The experiment itself changes the deployed geometry to
 128-token blocks, one current block plus 15
 learned earlier blocks, and k=2048. MiniMax MSA, LongCat LSA, and HiLS independently use an active
 budget near 2,048 tokens, making this a much more defensible starting point for actual adaptation.
-The exact pinned Megatron dependency has since been staged in a Birger-owned path; preflight job
-`21265221` passed, and replacement calibration job `21265492` is pending/running under automation.
+The exact pinned Megatron dependency was staged in a Birger-owned path; preflight job `21265221`
+passed. Replacement job `21265492` completed phase 1 and checkpoint 336, then encountered a
+transient RCCL CP-communicator timeout before update 337. Recovery job `21284719` loaded checkpoint
+336, completed updates 337–372 and checkpoint 372, then loaded 372 in a third process and completed
+update/checkpoint 373 with the explicit PASS signal.
 
 ## The two training phases
 
@@ -252,6 +261,50 @@ All 48 `.bin`/`.idx` pairs passed published checksums and real GPT blend constru
 1M, and 2M. Validation reports are under
 `/scratch/project_465002530/users/bmoell/superlong_data/manifests/`.
 
+### 512K/CP16 k=2,048 calibration — jobs 21265492 and 21284719
+
+This was real bounded full-parameter continued pretraining: 73 updates / 38,273,024 tokens at
+global sequence 524,288, CP16/local 32,768, TP8 over 128 ranks, theta 128M, all 36 layers sparse,
+128-token blocks, one forced current block plus 15 learned earlier blocks, selected-set KL, and
+full/uniform recomputation. Source commit `84feff7` used the project-owned Megatron checkout at
+revision `b359462c12858cedd2238a22eca0dca7aa6b8872` and the same verified 48-prefix blend.
+
+Job `21265492` completed updates 301–336 and a complete iteration-336 checkpoint. A fresh phase-2
+process then suffered a transient RCCL timeout in one CP all-gather before update 337; the other TP
+lanes timed out waiting downstream. Recovery job `21284719` loaded iteration 336 and completed
+updates 337–372. Its third fresh process loaded iteration 372, including the distributed optimizer,
+completed update 373, wrote the final checkpoint, advanced the tracker to 373, and printed
+`DSA 512K k2048 calibration PASS`.
+
+| Signal | Phase 1: 301–336 | Phase 2: 337–372 | Reload 373 |
+|---|---:|---:|---:|
+| Mean LM loss | 2.2370 | 2.0115 | 2.1218 |
+| Final LM loss | 2.5338 | 2.0425 | 2.1218 |
+| Mean indexer loss | 0.7122 | 0.6753 | 0.6328 |
+| Final indexer loss | 0.6750 | 0.6354 | 0.6328 |
+| Main-model probe norm | 2.2478 | 3.4279 | 1.8804 |
+| Indexer probe norm | 0.00700 | 0.01081 | 0.00703 |
+| Skipped / NaN updates | 0 / 0 | 0 / 0 | 0 / 0 |
+
+Each checkpoint contains `.metadata`, `common.pt`, and 256 distributed shards. Steady updates took
+about 81.7 seconds at roughly 50.1 tokens/s/GPU. Peak allocated/reserved memory was about
+17.7/25.7 GiB per rank. All related allocations—failed two-second launch `21050508`, preflight
+`21265221`, phase-1/transient-failure job `21265492`, and recovery `21284719`—used about 315.0
+GPU-hours in total.
+
+The mechanical pass did not satisfy the router-quality gate:
+
+| Retained tokens | Phase-1 mean / position quartiles | Phase-2 mean / position quartiles |
+|---|---|---|
+| 512 | 0.057 / [0.138, 0.042, 0.029, 0.021] | 0.055 / [0.134, 0.039, 0.027, 0.019] |
+| 1,024 | 0.072 / [0.173, 0.053, 0.036, 0.027] | 0.067 / [0.163, 0.048, 0.034, 0.025] |
+| 2,048 | 0.103 / [0.220, 0.082, 0.061, 0.047] | 0.092 / [0.206, 0.069, 0.053, 0.041] |
+
+Top-2,048 recall declined in 25/36 layers and by about 10% in the layer mean. The strong first-
+quartile advantage and very low later-quartile recall show that one forced 128-token current block
+plus shared learned routing does not preserve enough dense attention mass. The artifact is a valid
+pipeline/recovery result, not a quality-successful sparse model.
+
 ## What Kimi K3 contributes—and what it does not
 
 The [Kimi K3 technical report](https://github.com/MoonshotAI/Kimi-K3/blob/main/k3_tech_report.pdf)
@@ -280,12 +333,12 @@ non-interleaved indexer convention.
 | Exact causal selection | Validated | Dense-reference tests |
 | Native-GQA sparse core | Validated at small/8K scale | ROCm Triton fwd/bwd and integration gate |
 | Dual LM + selected-KL gradients | Validated for one step | Job 20336946 |
-| Sustained sparse adaptation | Not run | Next quality gate |
+| Sustained sparse adaptation | Bounded 73-update run validated | Finite/reload-safe, but router quality failed |
 | Sparse checkpoint save/reload | Validated through 512K | Jobs 20927044, 20932303, and 20996514 |
 | Context parallelism | Validated at CP2 and CP16 | 64K and 512K GPU round trips |
-| Hierarchical candidate generation | Implemented, quality unmeasured | 256-token current + 1 routed block |
+| Hierarchical candidate generation | Implemented and measured | 128-token current + 15 routed blocks; recall low and declining |
 | 128K+ memory behavior | Bounded gate validated at 512K | CP16 kept 32K local tokens; peak allocation about 17.7 GiB/rank |
-| 512K training | Two-update pipeline validated | Real superlong-v2 data; sustained quality adaptation not run |
+| 512K training | 73-update pipeline validated | Real superlong-v2 data; artifact rejected on recall quality |
 | 1M–2M training | Blocked | Replace replicated global K/V and reduce/stream selected state |
 | Sparse prefill | Not implemented | Current path assumes aligned full self-attention |
 | Sparse decode / KV cache | Not implemented | Needs paged cache and q-length-1 kernels |
@@ -293,7 +346,7 @@ non-interleaved indexer convention.
 
 ## Remaining build work
 
-### P0 — correctness ladder complete; execute a quality gate
+### P0 — correctness ladder complete; repair router quality
 
 1. **Passed (job 20927044):** `dsa_sparse_8k_roundtrip.sbatch` completed the GPU dense-reference
    tests, two-rank RCCL gather test, update 301, full checkpoint, fresh-process reload, and update
@@ -303,10 +356,13 @@ non-interleaved indexer convention.
 3. **Passed with actual superlong data (job 20996514):**
    `dsa_sparse_512k_cp16_roundtrip.sbatch` validated the 16-node pipeline and full checkpoint
    boundary using the checksum-verified 48-prefix blend.
-4. **Next:** compare dense and sparse loss/logits on fixed held-out batches and measure
-   attention-mass recall/retrieval before any sustained run.
-5. Only after that gate should we choose a longer adaptation schedule and evaluate short-context
-   retention and NIAH/RULER-style retrieval against the dense 256K model.
+4. **Completed mechanically, failed on quality (jobs 21265492 and 21284719):** 73 updates,
+   checkpoints 336/372/373, and fresh-process reloads passed, but mean top-2,048 recall declined
+   from 0.103 to 0.092 and remained strongly position-biased.
+5. **Next:** add a guaranteed 512–1,024-token local window and sink/prefix path, make routing per
+   GQA group, and train the selector longer with a dense teacher at 128K/256K.
+6. Then compare dense and sparse loss/logits on fixed held-out batches and measure retrieval plus
+   short-context retention before choosing any longer 512K schedule.
 
 The first 512K attempt, job `20938985`, stopped before its first forward pass when Megatron's
 top-level blend requested 66 samples from a mid-level component for which the default 0.5% sample
@@ -400,16 +456,18 @@ a drop-in match for this GQA model.
 2. **64K/CP2 round trip — passed (job 20932303):** same 32K local sequence as the final job.
 3. **512K/CP16 round trip — passed (job 20996514):** two sparse updates on real superlong-v2 data
    with a full checkpoint boundary.
-4. **k=2048 calibration — resubmitted as job 21265492:** job `21050508` failed in two seconds
-   because its shared Megatron path disappeared. Exact-revision dependency repair and one-node
-   preflight job `21265221` passed before resubmission. The run remains 73 real 512K updates
-   (38.27M tokens), two complete per-layer sampled dense-attention recall cycles, and
-   three-process save/reload validation.
-5. **Quality gate:** held-out loss, attention-mass recall, retrieval, and short-context retention.
-6. **Sustained 512K adaptation:** 0.1B tokens first; expand only from measured learning curves.
-7. **Selected-row CP transport + streamed KL:** required before 1M–2M.
-8. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
-9. **Inference track:** sparse prefill and decode must pass independently before publishing a
+4. **k=2048 calibration — mechanically passed, quality failed:** job `21265492` completed phase 1
+   before a transient CP timeout; recovery job `21284719` completed all 73 updates, two recall
+   cycles, and checkpoints/reloads 336/372/373. Mean top-2,048 recall fell from 0.103 to 0.092.
+5. **Router repair:** explicit 512–1,024 local coverage plus sinks, per-GQA selection, and longer
+   dense-teacher selector adaptation at 128K/256K.
+6. **Quality gate:** fixed-batch dense/sparse loss and logits, attention-mass recall, retrieval, and
+   short-context retention. Do not use iteration 373 as the start of a longer run.
+7. **Sustained 512K adaptation:** 0.1B tokens only after the repaired router passes; expand only
+   from measured learning curves.
+8. **Selected-row CP transport + streamed KL:** required before 1M–2M.
+9. **1M then 2M:** progressive curriculum with K3-style coherent/synthetic long-context data.
+10. **Inference track:** sparse prefill and decode must pass independently before publishing a
    practically usable sparse model.
 
 Never submit the archived `sparse_512k.sbatch`; it sets `DSA_SPARSE=0` and is not sparse training.

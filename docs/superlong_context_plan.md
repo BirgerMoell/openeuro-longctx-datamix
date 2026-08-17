@@ -1,7 +1,7 @@
 # Super-long context (512K → 1M → 2M): strategy & plan
 
-**Status:** 512K sparse pipeline validated; quality and sustained adaptation remain gated.
-**Updated:** 2026-08-14. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
+**Status:** 512K sparse training/recovery validated; current block router failed its recall-quality gate.
+**Updated:** 2026-08-17. Data: `birgermoell/oellm-longctx-tokenized-superlong-512k-1m-2m-v2`.
 
 ## 2026-08-11 readiness snapshot
 
@@ -33,9 +33,19 @@ The data, warm checkpoint, sparse code, and output were untouched. A replacement
 Birger-owned immutable checkout of the exact pinned upstream Megatron revision rather than another
 shared scratch dependency.
 
-That repair is complete: the exact revision is staged under Birger's dependency directory,
-one-node preflight job `21265221` passed the full environment/data/checkpoint audit, and the
-unchanged calibration was resubmitted as job `21265492`.
+That repair is complete: the exact revision is staged under Birger's dependency directory and
+one-node preflight job `21265221` passed the full environment/data/checkpoint audit. Job `21265492`
+then completed updates 301–336 and checkpoint 336 before a transient RCCL CP-communicator timeout
+in the fresh phase-2 process. Recovery job `21284719` loaded 336, completed updates 337–372 and
+checkpoint 372, then loaded 372 in a third process and completed update/checkpoint 373. All 73
+updates were finite with zero skipped/NaN iterations; the launcher emitted its explicit PASS.
+
+This is a pipeline success but not a sparse-quality success. Mean top-2,048 dense-attention-mass
+recall fell from 0.103 in phase 1 to 0.092 in phase 2, 25/36 layers declined, and the phase-2
+position quartiles were only [0.206, 0.069, 0.053, 0.041]. Do not continue from iteration 373.
+Repair local/sink coverage and shared routing, then repeat a bounded quality gate before spending
+on 0.1B tokens. Total scheduler exposure for the failed launch, preflight, phase-1/failure job, and
+recovery was about 315.0 GPU-hours.
 
 ## TL;DR
 We now have a **predictive law** for the one thing that actually mattered (RoPE θ), so the
@@ -45,16 +55,18 @@ being viable and sparse attention must take over.** 512K is a reasonable experim
 with our current ABF+CP approach; 1M is a stretch; **2M dense is a proof-of-concept that likely
 needs sparse attention** to be practical.
 
-## 1. θ schedule — already determined by our scaling law
-We measured: critical θ ≈ **doubles per context-length octave** (64K→8M, 128K→16M, 256K→32M).
-Extrapolating:
+## 1. θ schedule — deployed extension recipe
+The published extension checkpoints use 128K→32M and 256K→64M. Continuing the measured
+per-octave doubling gives the deployed/proposed schedule below. The completed sparse calibration
+used 512K→128M and was numerically stable, although its router failed independently on recall.
 
 | context | θ (rotary-base) | status |
 |---|---|---|
-| 256K | 32M | validating |
-| **512K** | **64M** | predicted |
-| **1M** | **128M** | predicted |
-| **2M** | **256M** | predicted (law may break — validate w/ needle-PPL) |
+| 128K | 32M | published extension recipe |
+| 256K | 64M | published extension recipe |
+| **512K** | **128M** | sparse training validated; quality still gated |
+| **1M** | **256M** | predicted |
+| **2M** | **512M** | predicted (law may break — validate w/ needle-PPL) |
 
 Each stage: load previous checkpoint, `--finetune`, raise `--seq-length` and `--rotary-base`,
 short continued-pretrain. **Caveat:** at θ ≥ 128M the law is unvalidated and very high θ can
@@ -107,11 +119,11 @@ dense goes and provides a reference for the sparse work.
 ## 6. Staged plan with decision gates
 0. **Prereq:** 256K works (MIOpen prebuild resolves the first-step hang) + a **≥256K-capable
    eval** exists. *Do not proceed without both.*
-1. **512K @ θ=64M, CP=32** (4 nodes/seq), short budget (~0.3–0.5B tok, heavy synthetic_recall).
+1. **512K @ θ=128M, CP=32** (4 nodes/seq), short budget (~0.3–0.5B tok, heavy synthetic_recall).
    Eval depth-0 @ 512K. **Gate:** depth-0 recovers → law holds, continue.
-2. **1M @ θ=128M, CP=64** (8 nodes/seq), tiny budget. Eval @ 1M. **Gate:** does dense+CP=64 even
+2. **1M @ θ=256M, CP=64** (8 nodes/seq), tiny budget. Eval @ 1M. **Gate:** does dense+CP=64 even
    run at acceptable throughput? If wall-time explodes → stop dense here.
-3. **2M @ θ=256M, CP=128** (16 nodes/seq) — **proof-of-concept only**: can we get *any* working
+3. **2M @ θ=512M, CP=128** (16 nodes/seq) — **proof-of-concept only**: can we get *any* working
    2M retrieval with dense+ABF? Expect very low throughput. Mainly a feasibility datapoint.
 4. **If dense stalls (likely by 1M):** pivot to the **sparse-attention** research track using the
    same data — the real path to practical 1M–2M.
@@ -121,15 +133,18 @@ dense goes and provides a reference for the sparse work.
 - **Medium:** 1M (compute heavy, CP=64 unproven, but plausible).
 - **Experimental:** 2M dense (256× compute, CP=128 ring across 16 nodes — proof-of-concept).
 - **Biggest unknowns:** (a) does the 256K first-step hang fix generalize to CP=32/64/128?
-  (b) eval infra at ≥512K; (c) does the θ-doubling law hold past 32M or do we need LongRoPE2.
+  (b) eval infra at ≥512K; (c) does the θ-doubling law hold beyond the numerically tested 128M or
+  do we need LongRoPE2.
 - **Compute budget is not the limit** (~1.4M GPU-h); **wall-time per step and infra are.**
 
 ## Bottom line
-Super-long is now **data-verified**, and the DSA correctness bridge has completed at 512K/CP16.
-The next decision is a measured quality gate, not another scale jump: compare dense and sparse
-loss/logits, attention-mass recall, retrieval, and short-context retention. If it passes, choose a
-small sustained 512K adaptation budget. Before 1M–2M, replace replicated global K/V with
-selected-row exchange and stream or recompute selected-set state.
+Super-long is **data-verified**, and bounded DSA training, checkpointing, recovery, and reload have
+completed at 512K/CP16. The present router is not good enough: sampled dense-attention recall is
+low, position-biased, and worsened during the 73-update calibration. The next step is a router
+repair—explicit local/sink coverage, per-GQA selection, and longer 128K/256K dense-teacher
+adaptation—followed by fixed-batch loss/logit and retrieval evaluation. Do not scale this artifact
+to a longer 512K run or to 1M. Before 1M–2M, also replace replicated global K/V with selected-row
+exchange and stream or recompute selected-set state.
 
 ---
 
@@ -140,9 +155,9 @@ at 128K ⇒ **~1.1e-6 GPU-h/token × (S/128K)**.
 
 | stage | θ | CP / nodes-per-seq | GPU-h (0.3B tok) | wall* | nodes |
 |---|---|---|---|---|---|
-| 512K | 64M | 32 / 4 | ~1,300 | ~5 h | 32 |
-| 1M | 128M | 64 / 8 | ~2,600 | ~5 h | 64 |
-| 2M | 256M | 128 / 16 | ~5,300 | ~5 h | 128 |
+| 512K | 128M | 32 / 4 | ~1,300 | ~5 h | 32 |
+| 1M | 256M | 64 / 8 | ~2,600 | ~5 h | 64 |
+| 2M | 512M | 128 / 16 | ~5,300 | ~5 h | 128 |
 
 \*Wall-time stays ~flat because GPU-h *and* GPU-count both scale ∝ S — you pay in **GPUs**, not
 hours. Full dense super-long sweep ≈ **~9–10k GPU-h**. Reference: v3 (128K, 2B) ≈ 2,200 GPU-h;

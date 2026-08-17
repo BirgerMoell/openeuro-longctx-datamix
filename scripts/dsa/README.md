@@ -24,19 +24,27 @@ Validated:
 - an 8K GPU/RCCL save/reload round trip through complete iterations 301 and 302 (job 20927044);
 - a 64K/CP2 round trip at the final 32K local shape (job 20932303); and
 - a 512K/CP16 round trip on the checksum-verified 48-prefix superlong-v2 blend, including a
-  fresh-process full-state reload (job 20996514).
+  fresh-process full-state reload (job 20996514); and
+- a 73-update 512K/CP16 k=2048 calibration through checkpoints 336/372/373 and two full-state
+  reload boundaries (jobs 21265492 and 21284719).
 
 The first k=2048 calibration launch, job `21050508`, failed before preflight because its shared
 external Megatron checkout had been removed. It performed no training and created no output. The
 replacement prerequisite is an immutable, project-owned checkout matching `MEGATRON_REVISION`.
 The checkout is now staged at
 `/scratch/project_465002530/users/bmoell/deps/NVIDIA-Megatron-LM-b359462c`; preflight job `21265221`
-passed, and replacement job `21265492` uses it through `MEGATRON_ROOT`.
+passed. Replacement job `21265492` completed phase 1/checkpoint 336, then hit a transient CP RCCL
+timeout before update 337. Recovery job `21284719` loaded 336 and completed the remaining updates,
+checkpoint 372, a fresh reload, update/checkpoint 373, and the explicit calibration PASS.
+
+This is a mechanical pipeline result, not a quality pass. Mean top-2048 dense-attention-mass recall
+declined from 0.103 to 0.092, with 25/36 layers worsening and strong position bias. Do not resume
+iteration 373 for a longer adaptation; repair local/sink coverage and per-GQA routing first.
 
 Not yet implemented or validated:
 
-- sustained sparse adaptation;
-- quality/recall of the coarse 512-token block route;
+- quality-successful sparse adaptation (the bounded 73-update run failed its recall gate);
+- explicit 512–1,024-token local/sink coverage and per-GQA-group routing;
 - selected-row rather than replicated-global K/V transport for 1M–2M;
 - sparse prefill/decode and KV-cache integration; and
 - model export and serving.

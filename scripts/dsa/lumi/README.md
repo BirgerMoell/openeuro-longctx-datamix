@@ -28,7 +28,7 @@ lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/
 | `dsa_sparse_8k_roundtrip.sbatch` | GPU/RCCL tests, sparse update, full save, fresh-process reload | **Passed; job 20927044, commit a8e3551** |
 | `dsa_sparse_64k_cp2_roundtrip.sbatch` | Two-node CP2 round trip at 32K local tokens/rank | **Passed; job 20932303** |
 | `dsa_sparse_512k_cp16_roundtrip.sbatch` | 16-node CP16 512K round trip | **Passed on real superlong-v2 data; job 20996514, commit 8e23ddf** |
-| `dsa_sparse_512k_k2048_calibration.sbatch` | 16-node CP16 real-data adaptation, 128×16 block budget | **Job 21050508 failed before preflight; dependency repaired and preflight 21265221 passed; replacement 21265492 submitted** |
+| `dsa_sparse_512k_k2048_calibration.sbatch` | 16-node CP16 real-data adaptation, 128×16 block budget | **Mechanically passed across jobs 21265492/21284719; recall-quality gate failed** |
 | `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
 
 The round-trip scripts use the standalone `block_cp` overlay: global zig-zag reorder, differentiable
@@ -55,3 +55,33 @@ Preflight found 48 data pairs, sequence 524288, CP16/local 32768, TP8/128 ranks,
 loaded iteration 301 with optimizer, RNG, and scheduler state before update 302. Both checkpoints
 contain `.metadata`, `common.pt`, and 256 distributed shards; tracker is 302. Runtime was 608
 seconds on 128 GPU slots (21.62 GPU-hours), and the launcher emitted its explicit PASS signal.
+
+### Completed 512K k=2048 calibration
+
+Use immutable source commit `84feff7` with:
+
+```text
+MEGATRON_ROOT=/scratch/project_465002530/users/bmoell/deps/NVIDIA-Megatron-LM-b359462c
+DSA_OUT=/scratch/project_465002530/users/bmoell/longctx-extend/output_dsa_sparse512k_k2048_calibration
+DATA_BLEND_FILE=/scratch/project_465002530/users/bmoell/superlong_data/mix/data_path.args
+```
+
+Preflight job `21265221` verified Megatron revision
+`b359462c12858cedd2238a22eca0dca7aa6b8872`, the overlay, checkpoint, 48-prefix data blend,
+CP/block geometry, and dataset surplus. Job `21265492` completed updates 301–336 and checkpoint
+336, then suffered a transient RCCL timeout in the first phase-2 CP all-gather. Recovery job
+`21284719` loaded 336, completed updates 337–372 and checkpoint 372, then loaded 372 in a third
+process and completed update/checkpoint 373. Checkpoints 336/372/373 each have `.metadata`,
+`common.pt`, and 256 distributed shards; tracker is 373. All updates were finite with zero
+skipped/NaN iterations, and the final launcher signal was `DSA 512K k2048 calibration PASS`.
+
+Steady updates took about 81.7 seconds at roughly 50.1 tokens/s/GPU, with peak memory around
+17.7 GiB allocated and 25.7 GiB reserved per rank. Total scheduler exposure across first launch
+`21050508`, preflight `21265221`, phase-1/transient-failure job `21265492`, and recovery `21284719`
+was about 315.0 GPU-hours.
+
+Do not treat the PASS signal as a model-quality result. Mean sampled top-2,048 attention-mass
+recall declined from 0.103 to 0.092; 25/36 layers worsened and phase-2 position quartiles were
+[0.206, 0.069, 0.053, 0.041]. Do not submit a longer run from iteration 373. The next bounded
+experiment must add explicit local/sink coverage, per-GQA routing, and longer dense-teacher indexer
+adaptation before repeating loss/logit and retrieval gates.
