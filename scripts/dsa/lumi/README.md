@@ -28,7 +28,7 @@ lost-in-the-middle), is **untested** — candidate sweep. Method details: `docs/
 | `dsa_sparse_8k_roundtrip.sbatch` | GPU/RCCL tests, sparse update, full save, fresh-process reload | **Passed; job 20927044, commit a8e3551** |
 | `dsa_sparse_64k_cp2_roundtrip.sbatch` | Two-node CP2 round trip at 32K local tokens/rank | **Passed; job 20932303** |
 | `dsa_sparse_512k_cp16_roundtrip.sbatch` | 16-node CP16 512K round trip | **Passed on real superlong-v2 data; job 20996514, commit 8e23ddf** |
-| `dsa_sparse_512k_k2048_calibration.sbatch` | 16-node CP16 real-data adaptation, 128×16 block budget | **Job 21050508 failed before preflight: shared Megatron checkout missing; no training/output** |
+| `dsa_sparse_512k_k2048_calibration.sbatch` | 16-node CP16 real-data adaptation, 128×16 block budget | **Job 21050508 failed before preflight; dependency repaired and preflight 21265221 passed; replacement 21265492 submitted** |
 | `sparse_512k.sbatch` | Historical 512K proposal | **Archived and fail-closed** |
 
 The round-trip scripts use the standalone `block_cp` overlay: global zig-zag reorder, differentiable

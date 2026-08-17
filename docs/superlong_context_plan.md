@@ -33,6 +33,10 @@ The data, warm checkpoint, sparse code, and output were untouched. A replacement
 Birger-owned immutable checkout of the exact pinned upstream Megatron revision rather than another
 shared scratch dependency.
 
+That repair is complete: the exact revision is staged under Birger's dependency directory,
+one-node preflight job `21265221` passed the full environment/data/checkpoint audit, and the
+unchanged calibration was resubmitted as job `21265492`.
+
 ## TL;DR
 We now have a **predictive law** for the one thing that actually mattered (RoPE θ), so the
 θ values for 512K/1M/2M are already known. The real constraints at super-long are **(1) the

@@ -29,6 +29,9 @@ Validated:
 The first k=2048 calibration launch, job `21050508`, failed before preflight because its shared
 external Megatron checkout had been removed. It performed no training and created no output. The
 replacement prerequisite is an immutable, project-owned checkout matching `MEGATRON_REVISION`.
+The checkout is now staged at
+`/scratch/project_465002530/users/bmoell/deps/NVIDIA-Megatron-LM-b359462c`; preflight job `21265221`
+passed, and replacement job `21265492` uses it through `MEGATRON_ROOT`.
 
 Not yet implemented or validated:
 

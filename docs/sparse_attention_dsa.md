@@ -61,6 +61,8 @@ write occurred. The experiment itself changes the deployed geometry to
 128-token blocks, one current block plus 15
 learned earlier blocks, and k=2048. MiniMax MSA, LongCat LSA, and HiLS independently use an active
 budget near 2,048 tokens, making this a much more defensible starting point for actual adaptation.
+The exact pinned Megatron dependency has since been staged in a Birger-owned path; preflight job
+`21265221` passed, and replacement calibration job `21265492` is pending/running under automation.
 
 ## The two training phases
 
@@ -398,11 +400,11 @@ a drop-in match for this GQA model.
 2. **64K/CP2 round trip — passed (job 20932303):** same 32K local sequence as the final job.
 3. **512K/CP16 round trip — passed (job 20996514):** two sparse updates on real superlong-v2 data
    with a full checkpoint boundary.
-4. **k=2048 calibration — infrastructure repair required:** job `21050508` failed in two seconds
-   because its shared Megatron path disappeared. Stage the exact pinned upstream revision in a
-   Birger-owned immutable path before resubmission. The intended run remains 73 real 512K updates
-   (38.27M tokens), two complete per-layer sampled dense-attention recall cycles, and three-process
-   save/reload validation.
+4. **k=2048 calibration — resubmitted as job 21265492:** job `21050508` failed in two seconds
+   because its shared Megatron path disappeared. Exact-revision dependency repair and one-node
+   preflight job `21265221` passed before resubmission. The run remains 73 real 512K updates
+   (38.27M tokens), two complete per-layer sampled dense-attention recall cycles, and
+   three-process save/reload validation.
 5. **Quality gate:** held-out loss, attention-mass recall, retrieval, and short-context retention.
 6. **Sustained 512K adaptation:** 0.1B tokens first; expand only from measured learning curves.
 7. **Selected-row CP transport + streamed KL:** required before 1M–2M.

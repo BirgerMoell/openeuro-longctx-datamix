@@ -41,6 +41,12 @@ available from the official NVIDIA Megatron-LM repository. Before a replacement 
 immutable Birger-owned checkout of that exact revision, verify it with the existing preflight, and
 pass it explicitly through `MEGATRON_ROOT`. Do not silently use a different Megatron revision.
 
+**Repair and replacement:** the exact upstream revision is now staged at
+`/scratch/project_465002530/users/bmoell/deps/NVIDIA-Megatron-LM-b359462c`. One-node preflight job
+`21265221` completed successfully in 63 seconds and verified the revision, overlay/module imports,
+warm checkpoint, 48 data pairs, CP/block geometry, and dataset surplus. The unchanged experiment
+was resubmitted as job `21265492` with `MEGATRON_ROOT` pointing to this owned checkout.
+
 The first evidence-calibrated run is deliberately bounded but is real full-parameter continued
 pretraining, not another two-update plumbing test:
 
