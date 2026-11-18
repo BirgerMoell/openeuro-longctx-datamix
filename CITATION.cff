@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use these results, models or code, please cite the report."
+title: "OpenEuroLLM long-context extension: data mix, scripts and evaluation"
+type: software
+authors:
+  - family-names: "Moëll"
+    given-names: "Birger"
+    affiliation: "AI Sweden"
+license: Apache-2.0
+repository-code: "https://github.com/BirgerMoell/openeuro-longctx-datamix"
+keywords:
+  - long-context
+  - RoPE
+  - context-extension
+  - OpenEuroLLM
+preferred-citation:
+  type: report
+  title: "The Start of the Window: RoPE's Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension"
+  authors:
+    - family-names: "Moëll"
+      given-names: "Birger"
+      affiliation: "AI Sweden"
+  institution:
+    name: "AI Sweden"
+  year: 2026
+  month: 11
+  url: "https://birgermoell.github.io/openeuro-longctx-datamix/"

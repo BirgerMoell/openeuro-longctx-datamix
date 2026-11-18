@@ -1,0 +1,14 @@
+{
+  "title": "The Start of the Window: RoPE's Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension",
+  "upload_type": "publication",
+  "publication_type": "technicalnote",
+  "description": "<p>Technical report, raw per-trial evaluation results, launch scripts and analysis code on far-position (depth-0) retrieval failure after RoPE base-frequency (ABF) context extension of a 9B multilingual OpenEuroLLM model to 128K and 256K tokens. A controlled theta sweep shows that the failure is fixed by the RoPE base, not by long-context data, and the critical-dimension theory of RoPE extrapolation, computed from the pretraining configuration alone, predicts the critical base at 64K, 128K and 256K. The PDF is in paper/rope-base-depth0.pdf.</p>",
+  "creators": [{"name": "Moëll, Birger", "affiliation": "AI Sweden"}],
+  "keywords": ["long context", "RoPE", "rotary position embedding", "base frequency", "context extension", "needle in a haystack", "OpenEuroLLM"],
+  "license": "apache-2.0",
+  "language": "eng",
+  "related_identifiers": [
+    {"identifier": "https://birgermoell.github.io/openeuro-longctx-datamix/", "relation": "isDocumentedBy", "resource_type": "publication-technicalnote"},
+    {"identifier": "https://huggingface.co/birgermoell/oellm-9b-128k-theta32m-v3", "relation": "isSupplementTo", "resource_type": "other"}
+  ]
+}

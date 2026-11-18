@@ -1,0 +1,8 @@
+#!/bin/bash
+export MIOPEN_USER_DB_PATH="/tmp/$(whoami)-miopen-cache-$SLURM_NODEID"
+export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
+export MIOPEN_FIND_MODE=FAST
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600
+export RANK=$SLURM_PROCID
+export LOCAL_RANK=$SLURM_LOCALID
+python3 -u "$@"

@@ -30,3 +30,6 @@ run_*.log
 
 # Pytest
 .pytest_cache/
+
+# Paper: raw per-trial NIAH results are small and must be committed
+!paper/raw/**/*.jsonl

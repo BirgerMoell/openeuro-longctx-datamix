@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The Start of the Window: RoPE&#x27;s Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension</title>
+    <meta name="description" content="Technical report: far-position (depth-0) retrieval failure after RoPE base-frequency context extension, a controlled theta sweep on a 9B multilingual OpenEuroLLM model at 128K and 256K, and a parameter-free prediction of the critical base from RoPE critical-dimension theory.">
+
+    <!-- Highwire Press tags for Google Scholar indexing -->
+    <meta name="citation_title" content="The Start of the Window: RoPE&#x27;s Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension">
+    <meta name="citation_author" content="Moëll, Birger">
+    <meta name="citation_author_institution" content="AI Sweden">
+    <meta name="citation_publication_date" content="2026/11/18">
+    <meta name="citation_online_date" content="2026/11/18">
+    <meta name="citation_technical_report_institution" content="AI Sweden">
+    <meta name="citation_technical_report_number" content="OELLM-LongCtx-2026-1">
+    <meta name="citation_language" content="en">
+    <meta name="citation_keywords" content="long context; RoPE; rotary position embedding; base frequency; ABF; needle in a haystack; context extension; OpenEuroLLM">
+    <meta name="citation_pdf_url" content="https://birgermoell.github.io/openeuro-longctx-datamix/rope-base-depth0.pdf">
+    <meta name="citation_abstract_html_url" content="https://birgermoell.github.io/openeuro-longctx-datamix/">
+    <!-- Dublin Core -->
+    <meta name="DC.title" content="The Start of the Window: RoPE&#x27;s Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension">
+    <meta name="DC.creator" content="Moëll, Birger">
+    <meta name="DC.date" content="2026-11-18">
+    <meta name="DC.type" content="Text.Report">
+
+    <link rel="canonical" href="https://birgermoell.github.io/openeuro-longctx-datamix/">
+    
+    <style>
+      :root { --ink:#101925; --paper:#f6f3ea; --blue:#0a2e63; --muted:#5b636c; --line:#c9c5ba; --code:#ece8dc; }
+      @media (prefers-color-scheme: dark) {
+        :root { --ink:#e9e6dd; --paper:#121820; --blue:#9cc2ff; --muted:#a3abb4; --line:#3a4350; --code:#1c242e; }
+      }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--paper); color:var(--ink); font-family: Georgia, "Times New Roman", serif; line-height:1.6; }
+      main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+      .kicker { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; letter-spacing:.08em; text-transform: uppercase; color: var(--muted); }
+      .kicker a { color: inherit; }
+      h1 { font-size: clamp(26px, 5vw, 38px); line-height:1.15; margin: 10px 0 14px; color: var(--blue); }
+      .authors { font-size: 18px; margin: 0; }
+      .meta { font-family: ui-sans-serif, system-ui, sans-serif; color: var(--muted); font-size: 14px; margin: 4px 0 24px; }
+      .actions { display:flex; flex-wrap:wrap; gap:10px; margin-bottom: 28px; font-family: ui-sans-serif, system-ui, sans-serif; }
+      .actions a { display:inline-block; padding: 9px 14px; border:1px solid var(--ink); text-decoration:none; color: var(--ink); font-weight:600; font-size:14px; }
+      .actions a.primary { background: var(--blue); border-color: var(--blue); color: var(--paper); }
+      h2 { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 15px; letter-spacing:.06em; text-transform: uppercase; margin-top: 36px; border-top:1px solid var(--line); padding-top: 18px; }
+      ul { padding-left: 20px; }
+      pre { background: var(--code); padding: 14px; overflow-x: auto; font-size: 13px; line-height:1.45; white-space: pre; }
+      .copy { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; padding: 6px 10px; border:1px solid var(--line); background: transparent; color: var(--ink); cursor:pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker"><a href="https://github.com/BirgerMoell/openeuro-longctx-datamix">OpenEuroLLM long context</a> · Technical report</p>
+      <h1>The Start of the Window: RoPE&#x27;s Critical Dimension Predicts the Base Frequency Needed for 128K–256K Context Extension</h1>
+      <p class="authors">Birger Moëll</p>
+      <p class="meta">AI Sweden · November 2026 · Version 1.0</p>
+
+      <div class="actions">
+        <a class="primary" href="rope-base-depth0.pdf">PDF</a>
+        <a href="https://github.com/BirgerMoell/openeuro-longctx-datamix">Code, raw trials &amp; scripts</a>
+        <a href="https://huggingface.co/birgermoell/oellm-9b-128k-theta32m-v3">Models</a>
+        <a href="#cite">Cite</a>
+      </div>
+
+      <h2>Abstract</h2>
+      <p>When a language model pretrained at 4K tokens is extended to 128K by raising the RoPE base frequency θ and continuing pretraining, it can retrieve facts from the middle and end of the window yet fail almost completely on facts placed at its very start. We study this depth-0 failure in a 9B-parameter multilingual OpenEuroLLM model extended to 128K and 256K tokens, using a forced-choice needle-in-a-haystack test in up to 15 languages and 20–90 trials per cell. Three results stand out. First, data does not fix it: two length-biased data mixes leave depth-0 accuracy at 64K at 0/20 and 1/20, below the 25% chance level, because the model is drawn to distractors seen recently. Second, θ does: in a controlled sweep from one 64K checkpoint, with identical data and 294M tokens per arm, depth-0 accuracy at 128K rises from 20% (θ = 8M) to 80% (16M) to 100% (32M). Third, the critical-dimension theory of RoPE extrapolation (Liu et al., 2024) predicts these thresholds without fitting: with a 4K pretraining window and base 10⁵, only the first 74 of 128 rotary dimensions complete a rotation in pretraining, giving a critical base of 8.9M at 64K, 29.6M at 128K and 98.2M at 256K. Pooled over all runs, retrieval is 97% (1954/2005) accurate when the needle lies within the critical period and 7% (8/120) beyond twice it. The theory implies that the critical base grows by a factor of 3.32 per doubling of context, not 2, so the common “double θ per octave” heuristic under-provisions 512K and 1M models by 2.5× and 4.2×. A more-pretrained 1T-token base, extended with an identical recipe, fixes depth-0 but loses accuracy in the middle of the window (94% versus 100% of mid-window trials correct), which a 1.26× token budget did not repair. We release the models, raw trials, launch scripts and analysis code.</p>
+
+      <h2>Key results</h2>
+      <ul>
+        <li>Far-position (depth-0) retrieval failure after context extension did not respond to two length-biased data mixes; failing models score below chance (0/20, 1/20 at 64K).</li>
+        <li>Controlled θ sweep at 128K, same checkpoint and data: depth-0 accuracy 20% (8M) → 80% (16M) → 100% (32M).</li>
+        <li>RoPE critical-dimension theory, computed from the pretraining configuration alone, predicts the threshold: 8.9M at 64K, 29.6M at 128K, 98M at 256K.</li>
+        <li>Across 2,445 long-context trials, retrieval is 97% accurate within the critical period and 7% beyond twice it.</li>
+        <li>The critical base grows ×3.3 per context doubling, not ×2: the doubling rule under-provisions 512K and 1M by 2.5× and 4.2×.</li>
+        <li>A 1T-token base with the identical recipe fixes depth-0 but keeps a lost-in-the-middle dip (94% vs 100%).</li>
+      </ul>
+
+      <h2 id="cite">Cite</h2>
+      <p>If you use these results, models or code, please cite the report:</p>
+      <pre id="bibtex">@techreport{moell2026ropebasedepth,
+  author      = {Mo{\"e}ll, Birger},
+  title       = {The Start of the Window: {RoPE}'s Critical Dimension Predicts
+                 the Base Frequency Needed for 128K--256K Context Extension},
+  institution = {AI Sweden},
+  type        = {Technical Report},
+  year        = {2026},
+  month       = nov,
+  url         = {https://birgermoell.github.io/openeuro-longctx-datamix/}
+}</pre>
+      <button class="copy" type="button" onclick="navigator.clipboard &amp;&amp; navigator.clipboard.writeText(document.getElementById('bibtex').innerText).then(()=>{this.textContent='Copied'})">Copy BibTeX</button>
+    </main>
+  </body>
+</html>

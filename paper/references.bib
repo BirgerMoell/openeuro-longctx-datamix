@@ -1,0 +1,363 @@
+% references.bib -- RoPE base-frequency (theta) scaling for long-context extension
+% The first block is copied verbatim from europa-eval/paper/references.bib (already verified).
+% All other entries were checked (2026-11-18) against arXiv records, ACL Anthology,
+% proceedings.iclr.cc, proceedings.neurips.cc, proceedings.mlr.press, OpenReview,
+% Crossref/publisher DOI records, or the original Reddit/GitHub source.
+
+% ---------------------------------------------------------------------------
+% Copied from europa-eval/paper/references.bib
+% ---------------------------------------------------------------------------
+
+@misc{openeurollm2025,
+  title        = {{OpenEuroLLM}},
+  author       = {{OpenEuroLLM}},
+  year         = {2025},
+  howpublished = {\url{https://openeurollm.eu}},
+  note         = {Project website. Accessed 2026-11-18}
+}
+
+@misc{oellmcatalogue,
+  title        = {{OpenEuroLLM} Training Data Catalogue: Languages},
+  author       = {{OpenEuroLLM}},
+  year         = {2025},
+  howpublished = {\url{https://github.com/OpenEuroLLM/training-data-catalogue/tree/main/languages}},
+  note         = {GitHub repository. Accessed 2026-11-18}
+}
+
+@misc{yang2025qwen3,
+  title         = {{Qwen3} Technical Report},
+  author        = {Yang, An and Li, Anfeng and Yang, Baosong and Zhang, Beichen and Hui, Binyuan and Zheng, Bo and Yu, Bowen and Gao, Chang and Huang, Chengen and Lv, Chenxu and others},
+  year          = {2025},
+  eprint        = {2505.09388},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  howpublished  = {arXiv preprint arXiv:2505.09388},
+  url           = {https://arxiv.org/abs/2505.09388}
+}
+
+@book{efron1994bootstrap,
+  title     = {An Introduction to the Bootstrap},
+  author    = {Efron, Bradley and Tibshirani, Robert J.},
+  publisher = {Chapman and Hall/CRC},
+  series    = {Monographs on Statistics and Applied Probability},
+  year      = {1994},
+  doi       = {10.1201/9780429246593}
+}
+
+@inproceedings{petrov2023tokenizer,
+  title     = {Language Model Tokenizers Introduce Unfairness Between Languages},
+  author    = {Petrov, Aleksandar and La Malfa, Emanuele and Torr, Philip and Bibi, Adel},
+  booktitle = {Advances in Neural Information Processing Systems 36},
+  volume    = {36},
+  pages     = {36963--36990},
+  year      = {2023},
+  publisher = {Curran Associates, Inc.},
+  doi       = {10.52202/075280-1608},
+  url       = {https://proceedings.neurips.cc/paper_files/paper/2023/hash/74bb24dca8334adce292883b4b651eda-Abstract-Conference.html}
+}
+
+@techreport{moell2026europaalignmentpaper,
+  title       = {{EUROPA} Alignment: A Transparent, Parallel Safety Benchmark for 36 {European} Languages},
+  author      = {Mo{\"e}ll, Birger},
+  institution = {AI Sweden},
+  year        = {2026},
+  month       = nov,
+  doi         = {10.5281/zenodo.24338447},
+  url         = {https://birgermoell.github.io/europa-alignment/paper/}
+}
+
+% ---------------------------------------------------------------------------
+% RoPE and context-window extension
+% ---------------------------------------------------------------------------
+
+@article{su2024roformer,
+  title   = {{RoFormer}: Enhanced Transformer with Rotary Position Embedding},
+  author  = {Su, Jianlin and Ahmed, Murtadha and Lu, Yu and Pan, Shengfeng and Bo, Wen and Liu, Yunfeng},
+  journal = {Neurocomputing},
+  volume  = {568},
+  pages   = {127063},
+  year    = {2024},
+  doi     = {10.1016/j.neucom.2023.127063}
+}
+
+@misc{chen2023pi,
+  title         = {Extending Context Window of Large Language Models via Positional Interpolation},
+  author        = {Chen, Shouyuan and Wong, Sherman and Chen, Liangjian and Tian, Yuandong},
+  year          = {2023},
+  eprint        = {2306.15595},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2306.15595}
+}
+
+@misc{bloc97ntk,
+  title        = {{NTK}-Aware Scaled {RoPE} allows {LLaMA} models to have extended (8k+) context size without any fine-tuning and minimal perplexity degradation},
+  author       = {{bloc97}},
+  year         = {2023},
+  howpublished = {Reddit post, r/LocalLLaMA},
+  url          = {https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/}
+}
+
+@inproceedings{peng2024yarn,
+  title     = {{YaRN}: Efficient Context Window Extension of Large Language Models},
+  author    = {Peng, Bowen and Quesnelle, Jeffrey and Fan, Honglu and Shippole, Enrico},
+  booktitle = {The Twelfth International Conference on Learning Representations ({ICLR})},
+  pages     = {31932--31951},
+  year      = {2024},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2024/hash/874a4d89f2d04b4bcf9a2c19545cf040-Abstract-Conference.html}
+}
+
+@inproceedings{xiong2024effective,
+  title     = {Effective Long-Context Scaling of Foundation Models},
+  author    = {Xiong, Wenhan and Liu, Jingyu and Molybog, Igor and Zhang, Hejia and Bhargava, Prajjwal and Hou, Rui and Martin, Louis and Rungta, Rashi and Sankararaman, Karthik Abinav and Oguz, Barlas and others},
+  booktitle = {Proceedings of the 2024 Conference of the North {A}merican Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)},
+  pages     = {4643--4663},
+  year      = {2024},
+  address   = {Mexico City, Mexico},
+  publisher = {Association for Computational Linguistics},
+  doi       = {10.18653/v1/2024.naacl-long.260},
+  url       = {https://aclanthology.org/2024.naacl-long.260/}
+}
+
+@misc{roziere2023codellama,
+  title         = {Code {Llama}: Open Foundation Models for Code},
+  author        = {Rozi{\`e}re, Baptiste and Gehring, Jonas and Gloeckle, Fabian and Sootla, Sten and Gat, Itai and Tan, Xiaoqing Ellen and Adi, Yossi and Liu, Jingyu and Sauvestre, Romain and Remez, Tal and others},
+  year          = {2023},
+  eprint        = {2308.12950},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2308.12950}
+}
+
+@misc{dubey2024llama3,
+  title         = {The {Llama} 3 Herd of Models},
+  author        = {Grattafiori, Aaron and Dubey, Abhimanyu and Jauhri, Abhinav and Pandey, Abhinav and Kadian, Abhishek and Al-Dahle, Ahmad and Letman, Aiesha and Mathur, Akhil and Schelten, Alan and Vaughan, Alex and others},
+  year          = {2024},
+  eprint        = {2407.21783},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2407.21783}
+}
+
+@inproceedings{ding2024longrope,
+  title     = {{LongRoPE}: Extending {LLM} Context Window Beyond 2 Million Tokens},
+  author    = {Ding, Yiran and Zhang, Li Lyna and Zhang, Chengruidong and Xu, Yuanyuan and Shang, Ning and Xu, Jiahang and Yang, Fan and Yang, Mao},
+  booktitle = {Proceedings of the 41st International Conference on Machine Learning},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {235},
+  pages     = {11091--11104},
+  year      = {2024},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v235/ding24i.html}
+}
+
+@inproceedings{shang2025longrope2,
+  title     = {{LongRoPE2}: Near-Lossless {LLM} Context Window Scaling},
+  author    = {Shang, Ning and Zhang, Li Lyna and Wang, Siyuan and Zhang, Gaokai and Lopez, Gilsinia and Yang, Fan and Chen, Weizhu and Yang, Mao},
+  booktitle = {Proceedings of the 42nd International Conference on Machine Learning},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {267},
+  pages     = {54203--54218},
+  year      = {2025},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v267/shang25a.html}
+}
+
+@inproceedings{liu2024scalinglaws,
+  title     = {Scaling Laws of {RoPE}-based Extrapolation},
+  author    = {Liu, Xiaoran and Yan, Hang and An, Chenxin and Qiu, Xipeng and Lin, Dahua},
+  booktitle = {The Twelfth International Conference on Learning Representations ({ICLR})},
+  pages     = {48160--48185},
+  year      = {2024},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2024/hash/d33b741600f100b31256c70a46f66ec9-Abstract-Conference.html}
+}
+
+@inproceedings{men2024base,
+  title     = {Base of {RoPE} Bounds Context Length},
+  author    = {Xu, Mingyu and Men, Xin and Wang, Bingning and Zhang, Qingyu and Lin, Hongyu and Lu, Yaojie and Han, Xianpei and Chen, Weipeng},
+  booktitle = {Advances in Neural Information Processing Systems 37},
+  volume    = {37},
+  pages     = {87386--87410},
+  year      = {2024},
+  publisher = {Curran Associates, Inc.},
+  doi       = {10.52202/079017-2773},
+  url       = {https://proceedings.neurips.cc/paper_files/paper/2024/hash/9f12dd32d552f3ad9eaa0e9dfec291be-Abstract-Conference.html}
+}
+
+@inproceedings{zhong2024attention,
+  title     = {Understanding the {RoPE} Extensions of Long-Context {LLMs}: An Attention Perspective},
+  author    = {Zhong, Meizhi and Zhang, Chen and Lei, Yikun and Liu, Xikai and Gao, Yan and Hu, Yao and Chen, Kehai and Zhang, Min},
+  booktitle = {Proceedings of the 31st International Conference on Computational Linguistics},
+  pages     = {8955--8962},
+  year      = {2025},
+  address   = {Abu Dhabi, UAE},
+  publisher = {Association for Computational Linguistics},
+  url       = {https://aclanthology.org/2025.coling-main.600/}
+}
+
+@inproceedings{wang2024resonance,
+  title     = {Resonance {RoPE}: Improving Context Length Generalization of Large Language Models},
+  author    = {Wang, Suyuchen and Kobyzev, Ivan and Lu, Peng and Rezagholizadeh, Mehdi and Liu, Bang},
+  booktitle = {Findings of the Association for Computational Linguistics: {ACL} 2024},
+  pages     = {586--598},
+  year      = {2024},
+  address   = {Bangkok, Thailand},
+  publisher = {Association for Computational Linguistics},
+  doi       = {10.18653/v1/2024.findings-acl.32},
+  url       = {https://aclanthology.org/2024.findings-acl.32/}
+}
+
+@inproceedings{press2022alibi,
+  title     = {Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation},
+  author    = {Press, Ofir and Smith, Noah A. and Lewis, Mike},
+  booktitle = {The Tenth International Conference on Learning Representations ({ICLR})},
+  year      = {2022},
+  url       = {https://openreview.net/forum?id=R8sQPpGCv0}
+}
+
+@inproceedings{kazemnejad2023nope,
+  title     = {The Impact of Positional Encoding on Length Generalization in Transformers},
+  author    = {Kazemnejad, Amirhossein and Padhi, Inkit and Natesan Ramamurthy, Karthikeyan and Das, Payel and Reddy, Siva},
+  booktitle = {Advances in Neural Information Processing Systems 36},
+  volume    = {36},
+  pages     = {24892--24928},
+  year      = {2023},
+  publisher = {Curran Associates, Inc.},
+  doi       = {10.52202/075280-1082},
+  url       = {https://proceedings.neurips.cc/paper_files/paper/2023/hash/4e85362c02172c0c6567ce593122d31c-Abstract-Conference.html}
+}
+
+% ---------------------------------------------------------------------------
+% Long-context evaluation
+% ---------------------------------------------------------------------------
+
+@article{liu2024lostmiddle,
+  title   = {Lost in the Middle: How Language Models Use Long Contexts},
+  author  = {Liu, Nelson F. and Lin, Kevin and Hewitt, John and Paranjape, Ashwin and Bevilacqua, Michele and Petroni, Fabio and Liang, Percy},
+  journal = {Transactions of the Association for Computational Linguistics},
+  volume  = {12},
+  pages   = {157--173},
+  year    = {2024},
+  doi     = {10.1162/tacl_a_00638}
+}
+
+@misc{kamradt2023niah,
+  title        = {Needle In A Haystack},
+  author       = {Kamradt, Greg},
+  year         = {2023},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/gkamradt/LLMTest_NeedleInAHaystack},
+  note         = {Repository now redirects to \url{https://github.com/gkamradt/needle-in-a-haystack}. Accessed 2026-11-18}
+}
+
+@inproceedings{hsieh2024ruler,
+  title     = {{RULER}: What's the Real Context Size of Your Long-Context Language Models?},
+  author    = {Hsieh, Cheng-Ping and Sun, Simeng and Kriman, Samuel and Acharya, Shantanu and Rekesh, Dima and Jia, Fei and Ginsburg, Boris},
+  booktitle = {First Conference on Language Modeling ({COLM})},
+  year      = {2024},
+  url       = {https://openreview.net/forum?id=kIoBbc76Sy}
+}
+
+@inproceedings{yen2025helmet,
+  title     = {{HELMET}: How to Evaluate Long-context Models Effectively and Thoroughly},
+  author    = {Yen, Howard and Gao, Tianyu and Hou, Minmin and Ding, Ke and Fleischer, Daniel and Izsak, Peter and Wasserblat, Moshe and Chen, Danqi},
+  booktitle = {The Thirteenth International Conference on Learning Representations ({ICLR})},
+  pages     = {98914--98965},
+  year      = {2025},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2025/hash/f5332c8273d02729730a9c24dec2135e-Abstract-Conference.html}
+}
+
+% ---------------------------------------------------------------------------
+% Long-context training recipes and data
+% ---------------------------------------------------------------------------
+
+@inproceedings{fu2024data,
+  title     = {Data Engineering for Scaling Language Models to 128{K} Context},
+  author    = {Fu, Yao and Panda, Rameswar and Niu, Xinyao and Yue, Xiang and Hajishirzi, Hannaneh and Kim, Yoon and Peng, Hao},
+  booktitle = {Proceedings of the 41st International Conference on Machine Learning},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {235},
+  pages     = {14125--14134},
+  year      = {2024},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v235/fu24d.html}
+}
+
+@inproceedings{gao2025prolong,
+  title     = {How to Train Long-Context Language Models (Effectively)},
+  author    = {Gao, Tianyu and Wettig, Alexander and Yen, Howard and Chen, Danqi},
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
+  pages     = {7376--7399},
+  year      = {2025},
+  address   = {Vienna, Austria},
+  publisher = {Association for Computational Linguistics},
+  doi       = {10.18653/v1/2025.acl-long.366},
+  url       = {https://aclanthology.org/2025.acl-long.366/}
+}
+
+@inproceedings{an2025string,
+  title     = {Why Does the Effective Context Length of {LLMs} Fall Short?},
+  author    = {An, Chenxin and Zhang, Jun and Zhong, Ming and Li, Lei and Gong, Shansan and Luo, Yao and Xu, Jingjing and Kong, Lingpeng},
+  booktitle = {The Thirteenth International Conference on Learning Representations ({ICLR})},
+  pages     = {54791--54810},
+  year      = {2025},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2025/hash/884baf65392170763b27c914087bde01-Abstract-Conference.html}
+}
+
+% ---------------------------------------------------------------------------
+% Systems
+% ---------------------------------------------------------------------------
+
+@misc{shoeybi2019megatron,
+  title         = {{Megatron-LM}: Training Multi-Billion Parameter Language Models Using Model Parallelism},
+  author        = {Shoeybi, Mohammad and Patwary, Mostofa and Puri, Raul and LeGresley, Patrick and Casper, Jared and Catanzaro, Bryan},
+  year          = {2019},
+  eprint        = {1909.08053},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/1909.08053}
+}
+
+@inproceedings{dao2024flashattention2,
+  title     = {{FlashAttention-2}: Faster Attention with Better Parallelism and Work Partitioning},
+  author    = {Dao, Tri},
+  booktitle = {The Twelfth International Conference on Learning Representations ({ICLR})},
+  pages     = {35549--35562},
+  year      = {2024},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2024/hash/98ed250b203d1ac6b24bbcf263e3d4a7-Abstract-Conference.html}
+}
+
+@inproceedings{liu2024ringattention,
+  title     = {{RingAttention} with Blockwise Transformers for Near-Infinite Context},
+  author    = {Liu, Hao and Zaharia, Matei and Abbeel, Pieter},
+  booktitle = {The Twelfth International Conference on Learning Representations ({ICLR})},
+  pages     = {3992--4008},
+  year      = {2024},
+  url       = {https://proceedings.iclr.cc/paper_files/paper/2024/hash/1119587863e78451f080da2a768c4935-Abstract-Conference.html}
+}
+
+% ---------------------------------------------------------------------------
+% Statistics
+% ---------------------------------------------------------------------------
+
+@article{wilson1927,
+  title   = {Probable Inference, the Law of Succession, and Statistical Inference},
+  author  = {Wilson, Edwin B.},
+  journal = {Journal of the American Statistical Association},
+  volume  = {22},
+  number  = {158},
+  pages   = {209--212},
+  year    = {1927},
+  doi     = {10.1080/01621459.1927.10502953}
+}
+
+@book{agresti2002,
+  title     = {Categorical Data Analysis},
+  author    = {Agresti, Alan},
+  edition   = {2nd},
+  publisher = {Wiley},
+  series    = {Wiley Series in Probability and Statistics},
+  year      = {2002},
+  isbn      = {9780471360933},
+  doi       = {10.1002/0471249688}
+}

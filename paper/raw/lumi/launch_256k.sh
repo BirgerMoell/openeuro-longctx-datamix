@@ -1,0 +1,9 @@
+#!/bin/bash
+export MIOPEN_USER_DB_PATH=/flash/project_465002530/users/bmoell/miopen_256k_cache
+export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
+mkdir -p $MIOPEN_USER_DB_PATH
+export MIOPEN_FIND_MODE=FAST
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=7200
+export RANK=$SLURM_PROCID
+export LOCAL_RANK=$SLURM_LOCALID
+python3 -u "$@"
