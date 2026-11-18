@@ -30,7 +30,8 @@
 \title{\textbf{The Start of the Window: RoPE's Critical Dimension Predicts the Base Frequency Needed for 128K--256K Context Extension}}
 \author{Birger Mo\"ell\\[2pt]
 \small AI Sweden\\
-\small \url{https://github.com/BirgerMoell/openeuro-longctx-datamix}}
+\small \url{https://github.com/BirgerMoell/openeuro-longctx-datamix}\\
+\small DOI: \href{https://doi.org/10.5281/zenodo.24340637}{10.5281/zenodo.24340637}}
 \date{November 2026 \quad (Version 1.0)}
 
 \begin{document}
@@ -208,7 +209,7 @@ When a context-extended RoPE model cannot read the start of its window, the base
 
 \section*{Availability}
 \label{sec:availability}
-Models (Apache-2.0): \nolinkurl{birgermoell/oellm-9b-128k-theta32m} (32M sweep arm), \nolinkurl{birgermoell/oellm-9b-128k-theta32m-v3}, \nolinkurl{birgermoell/oellm-9b-128k-theta32m-prelude} and \nolinkurl{birgermoell/oellm-9b-256k-theta64m-prelude} on Hugging Face, mirrored under \nolinkurl{openeurollm/}. Raw per-trial results with log-likelihoods, launch scripts, the evaluation script and \nolinkurl{paper/analysis.py}, which produces every number, table and figure here, are at \url{https://github.com/BirgerMoell/openeuro-longctx-datamix}.
+Models (Apache-2.0): \nolinkurl{birgermoell/oellm-9b-128k-theta32m} (32M sweep arm), \nolinkurl{birgermoell/oellm-9b-128k-theta32m-v3}, \nolinkurl{birgermoell/oellm-9b-128k-theta32m-prelude} and \nolinkurl{birgermoell/oellm-9b-256k-theta64m-prelude} on Hugging Face, mirrored under \nolinkurl{openeurollm/}. Raw per-trial results with log-likelihoods, launch scripts, the evaluation script and \nolinkurl{paper/analysis.py}, which produces every number, table and figure here, are at \url{https://github.com/BirgerMoell/openeuro-longctx-datamix}. This report and the repository snapshot it describes are archived on Zenodo at \href{https://doi.org/10.5281/zenodo.24340637}{doi:10.5281/zenodo.24340637}; the concept DOI \href{https://doi.org/10.5281/zenodo.24340636}{10.5281/zenodo.24340636} always resolves to the latest version.
 
 \section*{Acknowledgements}
 Training and evaluation ran on the EuroHPC system LUMI. We thank the OpenEuroLLM consortium for the base models, Jouni Luoma for the long-context data mix and training scripts on which this work builds, and the OpenEuroLLM long-context group for discussion.
